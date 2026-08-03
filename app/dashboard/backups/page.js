@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '../../../lib/supabaseClient';
 import { getMyBusiness } from '../../../lib/getMyBusiness';
@@ -14,7 +14,7 @@ const PROVIDER_INFO = {
   onedrive: { label: 'OneDrive', icon: '🔷' },
 };
 
-export default function BackupsPage() {
+function BackupsPageContent() {
   const supabase = createClient();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -186,5 +186,13 @@ export default function BackupsPage() {
         configured on the server first.
       </p>
     </DashboardShell>
+  );
+}
+
+export default function BackupsPage() {
+  return (
+    <Suspense fallback={<main style={{ padding: 40, color: 'var(--text-muted)' }}>Loading…</main>}>
+      <BackupsPageContent />
+    </Suspense>
   );
 }

@@ -1,5 +1,5 @@
-import { createAdminClient } from '../../../lib/supabaseAdmin';
-import { computeReceiptSignature } from '../../../lib/receiptSignature';
+import { createAdminClient } from '../../../../lib/supabaseAdmin';
+import { computeReceiptSignature } from '../../../../lib/receiptSignature';
 
 function money(n) {
   return '₦' + Number(n || 0).toLocaleString('en-NG');
