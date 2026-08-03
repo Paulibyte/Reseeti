@@ -1,0 +1,101 @@
+'use client';
+
+import Sidebar from './Sidebar';
+import NotificationsBell from './NotificationsBell';
+import MobileFAB from './MobileFAB';
+import OfflineBadge from './OfflineBadge';
+import InstallPrompt from './InstallPrompt';
+import UpdateNotification from './UpdateNotification';
+import FeedbackButton from './FeedbackButton';
+import Logo from '../components/Logo';
+
+export default function DashboardShell({
+  plan = 'free',
+  role,
+  onUpgradeClick,
+  onSettingsClick,
+  onCreateInvoice,
+  onSignOut,
+  notifications,
+  children,
+}) {
+  return (
+    <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
+      <Sidebar plan={plan} role={role} onUpgradeClick={onUpgradeClick} onSignOut={onSignOut} />
+
+      <div className="reseeti-content">
+        <header
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '16px 20px',
+            borderBottom: '1px solid var(--border)',
+            background: 'var(--surface)',
+            position: 'sticky',
+            top: 0,
+            zIndex: 10,
+          }}
+        >
+          <div className="reseeti-mobile-logo" style={{ display: 'flex' }}>
+            <Logo size={26} showWordmark />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' }}>
+            <OfflineBadge />
+            <NotificationsBell items={notifications} />
+            {onSignOut && (
+              <button
+                onClick={onSignOut}
+                className="reseeti-mobile-only"
+                style={{
+                  background: 'var(--surface-alt)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 8,
+                  padding: '8px 10px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                }}
+              >
+                Sign out
+              </button>
+            )}
+            {onSettingsClick && (
+              <button
+                onClick={onSettingsClick}
+                aria-label="Settings"
+                style={{
+                  background: 'var(--surface-alt)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 8,
+                  width: 36,
+                  height: 36,
+                  fontSize: 15,
+                  cursor: 'pointer',
+                }}
+              >
+                ⚙️
+              </button>
+            )}
+          </div>
+        </header>
+
+        <main style={{ maxWidth: 860, margin: '0 auto', padding: '24px 20px 100px' }}>
+          {children}
+        </main>
+      </div>
+
+      {onCreateInvoice && <MobileFAB onClick={onCreateInvoice} />}
+      {/*
+        Update takes priority over install (see InstallPrompt.jsx, which
+        hides itself while an update is pending) — only one of these two
+        ever shows at once, both rendered here so they cover every
+        /dashboard/* page rather than just the home page.
+      */}
+      <UpdateNotification />
+      <InstallPrompt />
+      <FeedbackButton />
+    </div>
+  );
+}

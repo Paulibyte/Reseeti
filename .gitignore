@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+
+# Environment variables — never commit real secrets
+.env
+.env.local
+.env*.local
+
+# Playwright (Stage 27)
+/e2e/.auth/
+/playwright-report/
+/test-results/
+
+# Misc
+.DS_Store
+*.pem
+npm-debug.log*
+
+# Sentry (Stage 27) — build-time source map staging, not meant to be committed
+.sentry-build-plugin/

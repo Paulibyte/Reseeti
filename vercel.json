@@ -1,0 +1,20 @@
+{
+  "crons": [
+    {
+      "path": "/api/reminders/send",
+      "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/backup/run",
+      "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/subscription/check-expiry",
+      "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/admin/database-backup",
+      "schedule": "0 4 * * *"
+    }
+  ]
+}

@@ -1,0 +1,113 @@
+:root {
+  --font-heading: 'Merriweather', Georgia, serif;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+
+  /* Light theme (default) */
+  --bg: #F7F3EA;
+  --surface: #FFFDF8;
+  --surface-alt: #F1EBDC;
+  --border: #D8D2C2;
+  --heading: #1E3A5F;
+  --text: #21201C;
+  --text-muted: #6b6455;
+  --text-faint: #8a8271;
+  --orange: #C97C2E;
+  --orange-dark: #A9631E;
+  --orange-bg: #F6E7DC;
+  --success: #2F6B4F;
+  --success-bg: #EAF1EC;
+  --danger: #A63A3A;
+  --danger-bg: #F7E7E5;
+  --shadow: 0 2px 10px rgba(30, 25, 15, 0.06);
+  --overlay: rgba(20, 16, 8, 0.5);
+}
+
+[data-theme='dark'] {
+  --bg: #0E1A2B;
+  --surface: #142438;
+  --surface-alt: #1B2E45;
+  --border: #2A3F5C;
+  --heading: #FFFFFF;
+  --text: #F2F5F9;
+  --text-muted: #B7C2D0;
+  --text-faint: #8C99AC;
+  --orange: #E0913F;
+  --orange-dark: #F0A45C;
+  --orange-bg: #2E2010;
+  --success: #4EA97D;
+  --success-bg: #163326;
+  --danger: #E07272;
+  --danger-bg: #3A1E1E;
+  --shadow: 0 2px 16px rgba(0, 0, 0, 0.35);
+  --overlay: rgba(4, 8, 16, 0.65);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+body {
+  font-family: var(--font-body);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-heading);
+  color: var(--heading);
+}
+
+a {
+  color: inherit;
+}
+
+input,
+button {
+  font-family: inherit;
+}
+
+::placeholder {
+  color: var(--text-faint);
+}
+
+/* Dashboard shell responsive behaviour */
+.reseeti-sidebar {
+  display: none;
+}
+.reseeti-fab {
+  display: flex;
+}
+@media (min-width: 880px) {
+  .reseeti-sidebar {
+    display: flex;
+  }
+  .reseeti-fab {
+    display: none;
+  }
+  .reseeti-content {
+    margin-left: 236px;
+  }
+  .reseeti-mobile-logo,
+  .reseeti-mobile-only {
+    display: none !important;
+  }
+}
+
+/* subtle scrollbar in dark mode so it doesn't look like default light UI chrome */
+[data-theme='dark'] ::-webkit-scrollbar {
+  background: var(--bg);
+}
+[data-theme='dark'] ::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
