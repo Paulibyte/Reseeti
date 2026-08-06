@@ -14,7 +14,6 @@ import Logo from '../components/Logo';
 export default function DashboardShell({
   plan = 'free',
   role,
-  overrides,
   onUpgradeClick,
   onSettingsClick,
   onCreateInvoice,
@@ -26,13 +25,12 @@ export default function DashboardShell({
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
-      <Sidebar plan={plan} role={role} overrides={overrides} onUpgradeClick={onUpgradeClick} onSignOut={onSignOut} />
+      <Sidebar plan={plan} role={role} onUpgradeClick={onUpgradeClick} onSignOut={onSignOut} />
       <MobileNavDrawer
         open={navOpen}
         onClose={() => setNavOpen(false)}
         plan={plan}
         role={role}
-        overrides={overrides}
         onUpgradeClick={onUpgradeClick}
         onSignOut={onSignOut}
       />

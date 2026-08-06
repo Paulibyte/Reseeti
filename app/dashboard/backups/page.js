@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '../../../lib/supabaseClient';
 import { getMyBusiness } from '../../../lib/getMyBusiness';
@@ -14,27 +14,12 @@ const PROVIDER_INFO = {
   onedrive: { label: 'OneDrive', icon: '🔷' },
 };
 
-// useSearchParams() (used below to read the ?connected=/?error= redirect
-// result from the OAuth callback) requires a Suspense boundary around
-// whatever calls it, or Next.js can't statically prerender this route at
-// build time. The actual page logic is unchanged — BackupsPageInner is
-// exactly what this file's default export used to be — this just adds
-// the wrapper Next.js needs around it.
-export default function BackupsPage() {
-  return (
-    <Suspense fallback={<main style={{ padding: 40, color: 'var(--text-muted)' }}>Loading…</main>}>
-      <BackupsPageInner />
-    </Suspense>
-  );
-}
-
-function BackupsPageInner() {
+function BackupsPageContent() {
   const supabase = createClient();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [business, setBusiness] = useState(null);
   const [role, setRole] = useState(null);
-  const [overrides, setOverrides] = useState({});
   const [loading, setLoading] = useState(true);
   const [connections, setConnections] = useState([]);
   const [runningProvider, setRunningProvider] = useState(null);
@@ -50,11 +35,10 @@ function BackupsPageInner() {
   }, [searchParams]);
 
   async function load() {
-    const { user, business: biz, role: myRole, overrides: myOverrides } = await getMyBusiness(supabase);
+    const { user, business: biz, role: myRole } = await getMyBusiness(supabase);
     if (!user) { router.push('/login'); return; }
     setBusiness(biz);
     setRole(myRole);
-    setOverrides(myOverrides || {});
     await loadConnections();
     setLoading(false);
   }
@@ -103,16 +87,16 @@ function BackupsPageInner() {
     return <main style={{ padding: 40, color: 'var(--text-muted)' }}>Loading…</main>;
   }
 
-  if (!can(role, 'manageSettings', overrides)) {
+  if (!can(role, 'manageSettings')) {
     return (
-      <DashboardShell plan={business.plan} role={role} overrides={overrides} onSignOut={signOut}>
+      <DashboardShell plan={business.plan} role={role} onSignOut={signOut}>
         <p style={{ color: 'var(--text-muted)' }}>You don&apos;t have permission to view this page.</p>
       </DashboardShell>
     );
   }
 
   return (
-    <DashboardShell plan={business.plan} role={role} overrides={overrides} onSignOut={signOut}>
+    <DashboardShell plan={business.plan} role={role} onSignOut={signOut}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div>
           <h1 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', fontSize: 22, margin: '0 0 6px' }}>
@@ -202,5 +186,13 @@ function BackupsPageInner() {
         configured on the server first.
       </p>
     </DashboardShell>
+  );
+}
+
+export default function BackupsPage() {
+  return (
+    <Suspense fallback={<main style={{ padding: 40, color: 'var(--text-muted)' }}>Loading…</main>}>
+      <BackupsPageContent />
+    </Suspense>
   );
 }

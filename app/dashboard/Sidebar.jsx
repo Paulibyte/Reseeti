@@ -8,9 +8,9 @@ import AppVersion from './AppVersion';
 import { can } from '../../lib/permissions';
 import { NAV_ITEMS } from './navItems';
 
-export default function Sidebar({ plan = 'free', role, overrides, onUpgradeClick, onSignOut }) {
+export default function Sidebar({ plan = 'free', role, onUpgradeClick, onSignOut }) {
   const pathname = usePathname();
-  const navItems = NAV_ITEMS.filter((item) => !item.permission || can(role, item.permission, overrides));
+  const navItems = NAV_ITEMS.filter((item) => !item.permission || can(role, item.permission));
 
   return (
     <aside
@@ -95,7 +95,7 @@ export default function Sidebar({ plan = 'free', role, overrides, onUpgradeClick
       </nav>
 
       <div style={{ flexShrink: 0, padding: '14px 16px 0', borderTop: '1px solid var(--border)' }}>
-        {plan === 'free' && can(role, 'manageSubscription', overrides) && (
+        {plan === 'free' && can(role, 'manageSubscription') && (
           onUpgradeClick ? (
             <button onClick={onUpgradeClick} style={upgradeBtnStyle}>
               Upgrade to Pro
