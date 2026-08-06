@@ -145,19 +145,27 @@ export default function AnalyticsPage() {
   const router = useRouter();
   const [business, setBusiness] = useState(null);
   const [role, setRole] = useState(null);
+  const [overrides, setOverrides] = useState({});
   const [invoices, setInvoices] = useState([]);
   const [items, setItems] = useState([]);
+  const [payments, setPayments] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showUpgrade, setShowUpgrade] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const d = new Date();
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().slice(0, 10);
+  });
 
   useEffect(() => { load(); }, []);
 
   async function load() {
-    const { user, business: biz, role: myRole } = await getMyBusiness(supabase);
+    const { user, business: biz, role: myRole, overrides: myOverrides } = await getMyBusiness(supabase);
     if (!user) { router.push('/login'); return; }
     setBusiness(biz);
     setRole(myRole);
+    setOverrides(myOverrides || {});
 
     const { data: invs } = await supabase
       .from('invoices')
@@ -180,6 +188,18 @@ export default function AnalyticsPage() {
         .select('invoice_id, description, qty, price, product_id, cost_price_at_sale')
         .in('invoice_id', ids);
       setItems(its || []);
+
+      // Powers the "how was today's money collected" breakdown — a
+      // separate table from invoices.payment_method (which only stores
+      // one summary string per invoice, 'split' for anything with more
+      // than one method — see confirmMarkPaid in dashboard/page.js). This
+      // is the actual per-method line items, including both halves of a
+      // split cash+transfer payment.
+      const { data: pays } = await supabase
+        .from('invoice_payments')
+        .select('invoice_id, method, amount, created_at')
+        .in('invoice_id', ids);
+      setPayments(pays || []);
     }
 
     setLoading(false);
@@ -399,13 +419,67 @@ export default function AnalyticsPage() {
     return { day: HEATMAP_DAY_LABELS[totals.indexOf(max)], count: max };
   }, [heatmapMatrix]);
 
+  const PAYMENT_METHOD_LABELS = { cash: '💵 Cash', transfer: '🏦 Transfer', pos: '💳 POS', card: '💳 Card', ussd: '📱 USSD', other: '📋 Other' };
+
+  // Everything below is scoped to selectedDate (a single calendar day,
+  // local time — matches the <input type="date"> control), not the
+  // month/all-time figures above. Two different "day" boundaries are
+  // used on purpose: which invoices were *raised* that day (for the
+  // items sold — a shop's daily sales report normally includes
+  // everything sold that day, paid or on credit) vs. which payments were
+  // *collected* that day (for the cash/POS/transfer split — a till
+  // reconciliation cares about money that actually moved today, which
+  // can include payment on an invoice raised a different day).
+  const isSameLocalDay = (isoString, dateStr) => {
+    if (!isoString) return false;
+    const d = new Date(isoString);
+    const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 10) === dateStr;
+  };
+
+  const dailyInvoiceIds = useMemo(() => {
+    return new Set(invoices.filter((inv) => isSameLocalDay(inv.created_at, selectedDate)).map((inv) => inv.id));
+  }, [invoices, selectedDate]);
+
+  const dailyItemBreakdown = useMemo(() => {
+    const map = {};
+    items.forEach((it) => {
+      if (!dailyInvoiceIds.has(it.invoice_id)) return;
+      const key = it.description || 'Item';
+      if (!map[key]) map[key] = { name: key, qty: 0, revenue: 0 };
+      map[key].qty += Number(it.qty || 0);
+      map[key].revenue += Number(it.qty || 0) * Number(it.price || 0);
+    });
+    return Object.values(map).sort((a, b) => b.qty - a.qty);
+  }, [items, dailyInvoiceIds]);
+
+  const dailyTotalSold = dailyItemBreakdown.reduce((s, it) => s + it.revenue, 0);
+  const dailyBestSeller = dailyItemBreakdown[0] || null;
+
+  const dailyPaymentBreakdown = useMemo(() => {
+    const map = {};
+    let total = 0;
+    payments.forEach((p) => {
+      if (!isSameLocalDay(p.created_at, selectedDate)) return;
+      const key = p.method || 'other';
+      map[key] = (map[key] || 0) + Number(p.amount || 0);
+      total += Number(p.amount || 0);
+    });
+    return {
+      total,
+      byMethod: Object.entries(map)
+        .map(([method, amount]) => ({ method, label: PAYMENT_METHOD_LABELS[method] || method, amount }))
+        .sort((a, b) => b.amount - a.amount),
+    };
+  }, [payments, selectedDate]);
+
   if (loading || !business) {
     return <main style={{ padding: 40, color: 'var(--text-muted)' }}>Loading…</main>;
   }
 
-  if (!can(role, 'viewAnalytics')) {
+  if (!can(role, 'viewAnalytics', overrides)) {
     return (
-      <DashboardShell plan={business.plan} role={role} onSignOut={signOut}>
+      <DashboardShell plan={business.plan} role={role} overrides={overrides} onSignOut={signOut}>
         <p style={{ color: 'var(--text-muted)' }}>You don&apos;t have permission to view this page.</p>
       </DashboardShell>
     );
@@ -414,7 +488,7 @@ export default function AnalyticsPage() {
   const hasData = invoices.length > 0;
 
   return (
-    <DashboardShell plan={business.plan} role={role} onSignOut={signOut} onUpgradeClick={() => setShowUpgrade(true)}>
+    <DashboardShell plan={business.plan} role={role} overrides={overrides} onSignOut={signOut} onUpgradeClick={() => setShowUpgrade(true)}>
       <h1 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', fontSize: 22, margin: '0 0 16px' }}>
         Analytics
       </h1>
@@ -437,6 +511,57 @@ export default function AnalyticsPage() {
               accent={momChange >= 0 ? 'var(--success)' : 'var(--danger)'}
               sub={lastMonthRevenue > 0 ? `${momChange >= 0 ? '▲' : '▼'} ${Math.abs(momChange).toFixed(0)}% vs last month` : 'No prior month to compare'} />
             <StatCard label="Total revenue" value={formatNaira(totalRevenue)} sub="All time, paid invoices" />
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '0 0 8px' }}>
+            <p style={{ margin: 0, fontWeight: 700, color: 'var(--text-muted)', fontSize: 12.5, textTransform: 'uppercase', letterSpacing: 0.4 }}>Day breakdown</p>
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              style={{ padding: '5px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12.5, background: 'var(--surface)', color: 'var(--text)' }}
+            />
+          </div>
+          <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginBottom: 18 }}>
+            <div style={{ flex: '1 1 260px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: 16 }}>
+              <p style={{ margin: '0 0 2px', fontWeight: 700, color: 'var(--text)', fontSize: 14 }}>How it was paid</p>
+              <p style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--text-faint)' }}>{formatNaira(dailyPaymentBreakdown.total)} collected this day</p>
+              {dailyPaymentBreakdown.byMethod.length === 0 && (
+                <p style={{ color: 'var(--text-faint)', fontSize: 13 }}>No payments recorded for this day.</p>
+              )}
+              {dailyPaymentBreakdown.byMethod.map((m, idx) => (
+                <div key={m.method} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: idx === dailyPaymentBreakdown.byMethod.length - 1 ? 'none' : '1px solid var(--border)' }}>
+                  <span style={{ fontSize: 13.5, color: 'var(--text)' }}>{m.label}</span>
+                  <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text)' }}>
+                    {formatNaira(m.amount)}
+                    <span style={{ fontWeight: 500, color: 'var(--text-faint)', fontSize: 11.5 }}>
+                      {' '}({dailyPaymentBreakdown.total > 0 ? ((m.amount / dailyPaymentBreakdown.total) * 100).toFixed(0) : 0}%)
+                    </span>
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div style={{ flex: '1 1 260px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: 16 }}>
+              <p style={{ margin: '0 0 2px', fontWeight: 700, color: 'var(--text)', fontSize: 14 }}>What sold</p>
+              <p style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--text-faint)' }}>
+                {formatNaira(dailyTotalSold)} across {dailyItemBreakdown.reduce((s, it) => s + it.qty, 0)} unit{dailyItemBreakdown.reduce((s, it) => s + it.qty, 0) === 1 ? '' : 's'}
+                {dailyBestSeller ? ` · best seller: ${dailyBestSeller.name}` : ''}
+              </p>
+              {dailyItemBreakdown.length === 0 && (
+                <p style={{ color: 'var(--text-faint)', fontSize: 13 }}>No sales on this day.</p>
+              )}
+              {dailyItemBreakdown.map((it, idx) => (
+                <div key={it.name} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: idx === dailyItemBreakdown.length - 1 ? 'none' : '1px solid var(--border)' }}>
+                  <div>
+                    <span style={{ fontSize: 13.5, color: 'var(--text)', fontWeight: idx === 0 ? 700 : 500 }}>
+                      {idx === 0 && '🏆 '}{it.name}
+                    </span>
+                    <span style={{ fontSize: 11.5, color: 'var(--text-faint)' }}> · {it.qty} sold</span>
+                  </div>
+                  <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text)' }}>{formatNaira(it.revenue)}</span>
+                </div>
+              ))}
+            </div>
           </div>
 
           <p style={{ margin: '0 0 8px', fontWeight: 700, color: 'var(--text-muted)', fontSize: 12.5, textTransform: 'uppercase', letterSpacing: 0.4 }}>Invoices</p>

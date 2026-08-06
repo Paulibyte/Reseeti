@@ -8,6 +8,7 @@ import { getMyBusiness } from '../../../lib/getMyBusiness';
 import DashboardShell from '../DashboardShell';
 import { can } from '../../../lib/permissions';
 import { formatNaira } from '../../../lib/format';
+import { csrfFetch } from '../../../lib/csrfFetch';
 
 // Code splitting: UpgradeModal only renders for free-plan businesses at
 // their invoice limit, and even then only after the person clicks
@@ -47,6 +48,7 @@ export default function ExpensesPage() {
   const router = useRouter();
   const [business, setBusiness] = useState(null);
   const [role, setRole] = useState(null);
+  const [overrides, setOverrides] = useState({});
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showUpgrade, setShowUpgrade] = useState(false);
@@ -57,10 +59,11 @@ export default function ExpensesPage() {
   useEffect(() => { load(); }, []);
 
   async function load() {
-    const { user, business: biz, role: myRole } = await getMyBusiness(supabase);
+    const { user, business: biz, role: myRole, overrides: myOverrides } = await getMyBusiness(supabase);
     if (!user) { router.push('/login'); return; }
     setBusiness(biz);
     setRole(myRole);
+    setOverrides(myOverrides || {});
 
     const { data: exps } = await supabase
       .from('expenses')
@@ -106,16 +109,16 @@ export default function ExpensesPage() {
     return <main style={{ padding: 40, color: 'var(--text-muted)' }}>Loading…</main>;
   }
 
-  if (!can(role, 'manageExpenses')) {
+  if (!can(role, 'manageExpenses', overrides)) {
     return (
-      <DashboardShell plan={business.plan} role={role} onSignOut={signOut}>
+      <DashboardShell plan={business.plan} role={role} overrides={overrides} onSignOut={signOut}>
         <p style={{ color: 'var(--text-muted)' }}>You don&apos;t have permission to view this page.</p>
       </DashboardShell>
     );
   }
 
   return (
-    <DashboardShell plan={business.plan} role={role} onSignOut={signOut} onUpgradeClick={() => setShowUpgrade(true)}>
+    <DashboardShell plan={business.plan} role={role} overrides={overrides} onSignOut={signOut} onUpgradeClick={() => setShowUpgrade(true)}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
         <h1 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', fontSize: 22, margin: 0 }}>
           Expenses
@@ -261,7 +264,7 @@ function ExpenseForm({ business, expense, onClose, onSaved }) {
         reader.readAsDataURL(file);
       });
 
-      const res = await fetch('/api/ai/extract-receipt', {
+      const res = await csrfFetch('/api/ai/extract-receipt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image: base64, mediaType: file.type }),

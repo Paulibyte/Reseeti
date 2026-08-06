@@ -24,6 +24,7 @@ export default function DiagnosticsPage() {
   const router = useRouter();
   const [business, setBusiness] = useState(null);
   const [role, setRole] = useState(null);
+  const [overrides, setOverrides] = useState({});
   const [loading, setLoading] = useState(true);
   const [report, setReport] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -32,10 +33,11 @@ export default function DiagnosticsPage() {
   useEffect(() => { load(); }, []);
 
   async function load() {
-    const { user, business: biz, role: myRole } = await getMyBusiness(supabase);
+    const { user, business: biz, role: myRole, overrides: myOverrides } = await getMyBusiness(supabase);
     if (!user) { router.push('/login'); return; }
     setBusiness(biz);
     setRole(myRole);
+    setOverrides(myOverrides || {});
     if (biz) await runChecks(biz.id);
     setLoading(false);
   }
@@ -165,16 +167,16 @@ export default function DiagnosticsPage() {
     return <main style={{ padding: 40, color: 'var(--text-muted)' }}>Loading…</main>;
   }
 
-  if (!can(role, 'manageSettings')) {
+  if (!can(role, 'manageSettings', overrides)) {
     return (
-      <DashboardShell plan={business.plan} role={role} onSignOut={signOut}>
+      <DashboardShell plan={business.plan} role={role} overrides={overrides} onSignOut={signOut}>
         <p style={{ color: 'var(--text-muted)' }}>You don&apos;t have permission to view this page.</p>
       </DashboardShell>
     );
   }
 
   return (
-    <DashboardShell plan={business.plan} role={role} onSignOut={signOut}>
+    <DashboardShell plan={business.plan} role={role} overrides={overrides} onSignOut={signOut}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
         <h1 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', fontSize: 22, margin: 0 }}>
           Diagnostics

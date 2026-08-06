@@ -5,17 +5,19 @@ import { createClient } from '../../../lib/supabaseClient';
 import CameraBarcodeScanner, { isCameraScanningSupported } from '../../components/CameraBarcodeScanner';
 import { queueEdit } from '../../../lib/offlineQueue';
 
-export default function ProductForm({ business, product, onClose, onSaved }) {
+export default function ProductForm({ business, product, familyId, familyName, onClose, onSaved }) {
   const supabase = createClient();
   const isEdit = !!product;
   const [form, setForm] = useState({
-    name: product?.name || '',
+    name: product?.name || familyName || '',
     barcode: product?.barcode || '',
     category: product?.category || '',
     price: product?.price ?? '',
     cost_price: product?.cost_price ?? '',
     stock_qty: product?.stock_qty ?? '',
     low_stock_threshold: product?.low_stock_threshold ?? 5,
+    unit: product?.unit || '',
+    unit_value: product?.unit_value ?? '',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -40,7 +42,19 @@ export default function ProductForm({ business, product, onClose, onSaved }) {
       cost_price: form.cost_price === '' ? null : Number(form.cost_price),
       stock_qty: Number(form.stock_qty) || 0,
       low_stock_threshold: Number(form.low_stock_threshold) || 0,
+      unit: form.unit || null,
+      unit_value: form.unit_value === '' ? null : Number(form.unit_value),
     };
+
+    // Only set on creation, and only when this form was opened via
+    // "+ Add variant" on an existing product (see inventory/page.js).
+    // Never touched on edit — a variant's family_id shouldn't be
+    // reassignable from this form; regrouping isn't a need this
+    // reviewer feedback round asked for, and silently changing it here
+    // would be an easy way to accidentally split or merge families.
+    if (!isEdit && familyId) {
+      payload.family_id = familyId;
+    }
 
     // Editing an existing product while offline queues the change
     // instead of failing outright — see lib/offlineQueue.js's
@@ -75,11 +89,27 @@ export default function ProductForm({ business, product, onClose, onSaved }) {
     <div style={{ position: 'fixed', inset: 0, background: 'var(--overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 50 }}>
       <div style={{ background: 'var(--surface)', borderRadius: 10, padding: 24, maxWidth: 420, width: '100%', borderTop: '5px solid var(--orange)' }}>
         <h3 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', marginTop: 0 }}>
-          {isEdit ? 'Edit product' : 'Add product'}
+          {isEdit ? 'Edit product' : familyId ? `Add a size/variant of "${familyName}"` : 'Add product'}
         </h3>
         <form onSubmit={save}>
           <label style={labelStyle}>Product name</label>
-          <input required value={form.name} onChange={(e) => set('name', e.target.value)} style={inputStyle} placeholder="e.g. Bag of Rice (50kg)" />
+          <input required value={form.name} onChange={(e) => set('name', e.target.value)} style={inputStyle} placeholder="e.g. Bag of Rice" />
+
+          <div style={{ display: 'flex', gap: 10 }}>
+            <div style={{ flex: 1 }}>
+              <label style={labelStyle}>Unit (optional)</label>
+              <input value={form.unit} onChange={(e) => set('unit', e.target.value)} style={inputStyle} placeholder="e.g. kg, l, pcs, carton" />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={labelStyle}>Unit size (optional)</label>
+              <input type="number" min="0" step="any" value={form.unit_value} onChange={(e) => set('unit_value', e.target.value)} style={inputStyle} placeholder="e.g. 50" />
+            </div>
+          </div>
+          <p style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: -6, marginBottom: 4 }}>
+            {familyId
+              ? 'This becomes another size of the same item — e.g. a 25kg bag alongside a 50kg bag.'
+              : 'Fill these in if this item comes in a specific size (e.g. unit "kg", size "50" for a 50kg bag). You can add more sizes of the same item later from the Inventory list.'}
+          </p>
 
           <div style={{ display: 'flex', gap: 10 }}>
             <div style={{ flex: 1 }}>

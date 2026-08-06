@@ -1,6 +1,8 @@
 'use client';
 
+import { useState } from 'react';
 import Sidebar from './Sidebar';
+import MobileNavDrawer from './MobileNavDrawer';
 import NotificationsBell from './NotificationsBell';
 import MobileFAB from './MobileFAB';
 import OfflineBadge from './OfflineBadge';
@@ -12,6 +14,7 @@ import Logo from '../components/Logo';
 export default function DashboardShell({
   plan = 'free',
   role,
+  overrides,
   onUpgradeClick,
   onSettingsClick,
   onCreateInvoice,
@@ -19,9 +22,20 @@ export default function DashboardShell({
   notifications,
   children,
 }) {
+  const [navOpen, setNavOpen] = useState(false);
+
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
-      <Sidebar plan={plan} role={role} onUpgradeClick={onUpgradeClick} onSignOut={onSignOut} />
+      <Sidebar plan={plan} role={role} overrides={overrides} onUpgradeClick={onUpgradeClick} onSignOut={onSignOut} />
+      <MobileNavDrawer
+        open={navOpen}
+        onClose={() => setNavOpen(false)}
+        plan={plan}
+        role={role}
+        overrides={overrides}
+        onUpgradeClick={onUpgradeClick}
+        onSignOut={onSignOut}
+      />
 
       <div className="reseeti-content">
         <header
@@ -37,8 +51,30 @@ export default function DashboardShell({
             zIndex: 10,
           }}
         >
-          <div className="reseeti-mobile-logo" style={{ display: 'flex' }}>
-            <Logo size={26} showWordmark />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button
+              onClick={() => setNavOpen(true)}
+              aria-label="Open menu"
+              className="reseeti-mobile-only"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'var(--surface-alt)',
+                border: '1px solid var(--border)',
+                borderRadius: 8,
+                width: 36,
+                height: 36,
+                fontSize: 16,
+                cursor: 'pointer',
+                color: 'var(--text)',
+              }}
+            >
+              ☰
+            </button>
+            <div className="reseeti-mobile-logo" style={{ display: 'flex' }}>
+              <Logo size={26} showWordmark />
+            </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' }}>
             <OfflineBadge />

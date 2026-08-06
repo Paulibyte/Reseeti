@@ -38,6 +38,7 @@ export default function ActivityPage() {
   const router = useRouter();
   const [business, setBusiness] = useState(null);
   const [role, setRole] = useState(null);
+  const [overrides, setOverrides] = useState({});
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('activity'); // 'activity' | 'security'
   const [events, setEvents] = useState([]);
@@ -49,10 +50,11 @@ export default function ActivityPage() {
   useEffect(() => { if (business) loadEvents(0); }, [tab]);
 
   async function load() {
-    const { user, business: biz, role: myRole } = await getMyBusiness(supabase);
+    const { user, business: biz, role: myRole, overrides: myOverrides } = await getMyBusiness(supabase);
     if (!user) { router.push('/login'); return; }
     setBusiness(biz);
     setRole(myRole);
+    setOverrides(myOverrides || {});
     setLoading(false);
     if (myRole === 'owner') await loadEvents(0);
   }
@@ -76,16 +78,16 @@ export default function ActivityPage() {
     return <main style={{ padding: 40, color: 'var(--text-muted)' }}>Loading…</main>;
   }
 
-  if (!can(role, 'manageSettings')) {
+  if (!can(role, 'manageSettings', overrides)) {
     return (
-      <DashboardShell plan={business.plan} role={role} onSignOut={signOut}>
+      <DashboardShell plan={business.plan} role={role} overrides={overrides} onSignOut={signOut}>
         <p style={{ color: 'var(--text-muted)' }}>You don&apos;t have permission to view this page.</p>
       </DashboardShell>
     );
   }
 
   return (
-    <DashboardShell plan={business.plan} role={role} onSignOut={signOut}>
+    <DashboardShell plan={business.plan} role={role} overrides={overrides} onSignOut={signOut}>
       <h1 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', fontSize: 22, margin: '0 0 6px' }}>
         Activity &amp; Audit Log
       </h1>

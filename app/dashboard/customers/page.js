@@ -30,11 +30,14 @@ export default function CustomersPage() {
   const router = useRouter();
   const [business, setBusiness] = useState(null);
   const [role, setRole] = useState(null);
+  const [overrides, setOverrides] = useState({});
   const [customers, setCustomers] = useState([]);
   const [invoices, setInvoices] = useState([]);
+  const [partialPayments, setPartialPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [search, setSearch] = useState('');
+  const [owingOnly, setOwingOnly] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [newName, setNewName] = useState('');
@@ -50,7 +53,7 @@ export default function CustomersPage() {
   useEffect(() => { load(); }, []);
   // Any time the search text changes the result set shifts, so jump back
   // to page 1 rather than potentially landing on a now-empty later page.
-  useEffect(() => { setPage(0); }, [search]);
+  useEffect(() => { setPage(0); }, [search, owingOnly]);
 
   // Live cross-device sync — see the identical pattern in
   // inventory/page.js's products subscription for the reasoning.
@@ -68,10 +71,11 @@ export default function CustomersPage() {
   });
 
   async function load() {
-    const { user, business: biz, role: myRole } = await getMyBusiness(supabase);
+    const { user, business: biz, role: myRole, overrides: myOverrides } = await getMyBusiness(supabase);
     if (!user) { router.push('/login'); return; }
     setBusiness(biz);
     setRole(myRole);
+    setOverrides(myOverrides || {});
 
     // Instant paint from the last cached snapshot while the network
     // request is still in flight — see lib/idbCache.js.
@@ -96,6 +100,20 @@ export default function CustomersPage() {
       .select('id, customer_id, customer_name, customer_phone, total, paid, created_at')
       .eq('business_id', biz.id);
     setInvoices(invs || []);
+
+    // Needed so an unpaid invoice with a partial payment already logged
+    // against it (Stage 31) doesn't overstate how much a customer still
+    // owes — see statsByCustomer below.
+    const unpaidIds = (invs || []).filter((i) => !i.paid).map((i) => i.id);
+    if (unpaidIds.length) {
+      const { data: pays } = await supabase
+        .from('invoice_payments')
+        .select('invoice_id, amount')
+        .in('invoice_id', unpaidIds);
+      setPartialPayments(pays || []);
+    } else {
+      setPartialPayments([]);
+    }
 
     setLoading(false);
   }
@@ -139,23 +157,35 @@ export default function CustomersPage() {
   // on phone/name for invoices created before this stage (which won't
   // have a customer_id set).
   const statsByCustomer = useMemo(() => {
+    const paidSoFarByInvoice = {};
+    partialPayments.forEach((p) => {
+      paidSoFarByInvoice[p.invoice_id] = (paidSoFarByInvoice[p.invoice_id] || 0) + Number(p.amount || 0);
+    });
     const map = {};
     invoices.forEach((inv) => {
       const key = inv.customer_id || `legacy:${inv.customer_phone || inv.customer_name}`;
       if (!map[key]) map[key] = { count: 0, balance: 0 };
       map[key].count += 1;
-      if (!inv.paid) map[key].balance += Number(inv.total);
+      if (!inv.paid) {
+        const remaining = Number(inv.total) - (paidSoFarByInvoice[inv.id] || 0);
+        map[key].balance += Math.max(0, remaining);
+      }
     });
     return map;
-  }, [invoices]);
+  }, [invoices, partialPayments]);
 
   function statsFor(customer) {
     return statsByCustomer[customer.id] || statsByCustomer[`legacy:${customer.phone || customer.name}`] || { count: 0, balance: 0 };
   }
 
-  const filtered = customers.filter((c) =>
-    c.name.toLowerCase().includes(search.toLowerCase()) || (c.phone || '').includes(search)
-  );
+  const filtered = customers
+    .filter((c) => c.name.toLowerCase().includes(search.toLowerCase()) || (c.phone || '').includes(search))
+    .filter((c) => !owingOnly || statsFor(c).balance > 0);
+  // When showing only debtors, biggest debt first — that's the order an
+  // owner actually wants when deciding who to follow up with today.
+  if (owingOnly) filtered.sort((a, b) => statsFor(b).balance - statsFor(a).balance);
+  const totalOwed = customers.reduce((s, c) => s + statsFor(c).balance, 0);
+  const debtorCount = customers.filter((c) => statsFor(c).balance > 0).length;
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const pageItems = filtered.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
 
@@ -163,16 +193,16 @@ export default function CustomersPage() {
     return <main style={{ padding: 40, color: 'var(--text-muted)' }}>Loading…</main>;
   }
 
-  if (!can(role, 'manageCustomers')) {
+  if (!can(role, 'manageCustomers', overrides)) {
     return (
-      <DashboardShell plan={business.plan} role={role} onSignOut={signOut}>
+      <DashboardShell plan={business.plan} role={role} overrides={overrides} onSignOut={signOut}>
         <p style={{ color: 'var(--text-muted)' }}>You don&apos;t have permission to view this page.</p>
       </DashboardShell>
     );
   }
 
   return (
-    <DashboardShell plan={business.plan} role={role} onSignOut={signOut} onUpgradeClick={() => setShowUpgrade(true)}>
+    <DashboardShell plan={business.plan} role={role} overrides={overrides} onSignOut={signOut} onUpgradeClick={() => setShowUpgrade(true)}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h1 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', fontSize: 22, margin: 0 }}>
           Customers
@@ -193,20 +223,41 @@ export default function CustomersPage() {
         </div>
       </div>
 
-      <input
-        placeholder="Search by name or phone"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        style={{
-          width: '100%', padding: '11px 14px', border: '1px solid var(--border)', borderRadius: 8,
-          fontSize: 14, marginBottom: 18, boxSizing: 'border-box', background: 'var(--surface)', color: 'var(--text)',
-        }}
-      />
+      <div style={{ display: 'flex', gap: 10, marginBottom: 18, flexWrap: 'wrap' }}>
+        <input
+          placeholder="Search by name or phone"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{
+            flex: '1 1 220px', padding: '11px 14px', border: '1px solid var(--border)', borderRadius: 8,
+            fontSize: 14, boxSizing: 'border-box', background: 'var(--surface)', color: 'var(--text)',
+          }}
+        />
+        <button
+          onClick={() => setOwingOnly((v) => !v)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 7, padding: '0 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer',
+            border: owingOnly ? 'none' : '1px solid var(--border)',
+            background: owingOnly ? 'var(--danger)' : 'var(--surface)',
+            color: owingOnly ? '#fff' : 'var(--text)',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {owingOnly ? '✓ ' : ''}Owing only {debtorCount > 0 ? `(${debtorCount})` : ''}
+        </button>
+      </div>
+      {totalOwed > 0 && (
+        <p style={{ margin: '-10px 0 16px', fontSize: 13, color: 'var(--text-muted)' }}>
+          <strong style={{ color: 'var(--danger)' }}>₦{totalOwed.toLocaleString()}</strong> owed across {debtorCount} customer{debtorCount === 1 ? '' : 's'}.
+        </p>
+      )}
 
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
         {filtered.length === 0 && (
           <p style={{ color: 'var(--text-faint)', padding: 16, margin: 0 }}>
-            {customers.length === 0 ? 'No customers yet — they\'ll appear here automatically once you invoice someone, or add one directly.' : 'No matches.'}
+            {owingOnly
+              ? 'No customers currently owe you anything. 🎉'
+              : customers.length === 0 ? 'No customers yet — they\'ll appear here automatically once you invoice someone, or add one directly.' : 'No matches.'}
           </p>
         )}
         {pageItems.map((c, idx) => {

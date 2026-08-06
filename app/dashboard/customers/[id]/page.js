@@ -15,6 +15,7 @@ import { queueEdit } from '../../../../lib/offlineQueue';
 // Upgrade — most page loads never need it, so it's fetched as its own
 // chunk on first use instead of bundled into every dashboard page.
 const UpgradeModal = dynamic(() => import('../../UpgradeModal'), { ssr: false });
+const RecordPaymentModal = dynamic(() => import('./RecordPaymentModal'), { ssr: false });
 
 export default function CustomerDetailPage() {
   const supabase = createClient();
@@ -23,11 +24,14 @@ export default function CustomerDetailPage() {
   const [business, setBusiness] = useState(null);
   const [customer, setCustomer] = useState(null);
   const [invoices, setInvoices] = useState([]);
+  const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ name: '', phone: '', email: '', address: '', tax_id: '', notes: '' });
   const [saving, setSaving] = useState(false);
   const [showUpgrade, setShowUpgrade] = useState(false);
+  const [expandedInvoice, setExpandedInvoice] = useState(null);
+  const [recordingPaymentFor, setRecordingPaymentFor] = useState(null);
 
   useEffect(() => { load(); }, [params.id]);
 
@@ -59,6 +63,23 @@ export default function CustomerDetailPage() {
       .eq('customer_id', params.id)
       .order('created_at', { ascending: false });
     setInvoices(invs || []);
+
+    // Every payment (full or partial) against any of this customer's
+    // invoices — this is the actual "how are they paying, and when" log
+    // the reviewer feedback asked for, not just a paid/unpaid flag. See
+    // schema_stage31.sql for how a partial payment here can accumulate
+    // toward an invoice and eventually flip it to paid on its own.
+    const ids = (invs || []).map((i) => i.id);
+    if (ids.length) {
+      const { data: pays } = await supabase
+        .from('invoice_payments')
+        .select('id, invoice_id, method, amount, created_at')
+        .in('invoice_id', ids)
+        .order('created_at', { ascending: false });
+      setPayments(pays || []);
+    } else {
+      setPayments([]);
+    }
 
     setLoading(false);
   }
@@ -115,7 +136,17 @@ export default function CustomerDetailPage() {
     );
   }
 
-  const balance = invoices.filter((i) => !i.paid).reduce((sum, i) => sum + Number(i.total), 0);
+  const paymentsFor = (invoiceId) => payments.filter((p) => p.invoice_id === invoiceId);
+  const paidSoFar = (invoiceId) => paymentsFor(invoiceId).reduce((s, p) => s + Number(p.amount), 0);
+  const PAYMENT_METHOD_LABELS = { cash: 'Cash', transfer: 'Transfer', pos: 'POS', card: 'Card', ussd: 'USSD', other: 'Other' };
+
+  // Balance owed accounts for partial payments already logged against a
+  // still-unpaid invoice (Stage 31) — not just the raw invoice total, so
+  // a customer who's paid most of what they owe doesn't still show as
+  // owing the full original amount.
+  const balance = invoices
+    .filter((i) => !i.paid)
+    .reduce((sum, i) => sum + Math.max(0, Number(i.total) - paidSoFar(i.id)), 0);
   const lifetimeValue = invoices.reduce((sum, i) => sum + Number(i.total), 0);
 
   return (
@@ -184,31 +215,74 @@ export default function CustomerDetailPage() {
       <h3 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', fontSize: 16, marginBottom: 12 }}>Purchase history</h3>
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
         {invoices.length === 0 && <p style={{ color: 'var(--text-faint)', padding: 16, margin: 0 }}>No invoices for this customer yet.</p>}
-        {invoices.map((inv, idx) => (
-          <a
-            key={inv.id}
-            href={`/inv/${inv.id}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '12px 16px',
-              textDecoration: 'none', borderBottom: idx === invoices.length - 1 ? 'none' : '1px solid var(--border)',
-            }}
-          >
-            <span style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--heading)' }}>{inv.invoice_number}</span>
-            <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
-              {new Date(inv.created_at).toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' })}
-            </span>
-            <span style={{ fontWeight: 700, color: 'var(--text)' }}>{formatNaira(inv.total)}</span>
-            <span style={{
-              fontSize: 11, padding: '3px 9px', borderRadius: 12, fontWeight: 700,
-              background: inv.paid ? 'var(--success-bg)' : 'var(--orange-bg)',
-              color: inv.paid ? 'var(--success)' : 'var(--orange-dark)',
-            }}>
-              {inv.paid ? 'PAID' : 'UNPAID'}
-            </span>
-          </a>
-        ))}
+        {invoices.map((inv, idx) => {
+          const invPayments = paymentsFor(inv.id);
+          const paid = paidSoFar(inv.id);
+          const remaining = Number(inv.total) - paid;
+          const isExpanded = expandedInvoice === inv.id;
+          return (
+            <div key={inv.id} style={{ borderBottom: idx === invoices.length - 1 ? 'none' : '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '12px 16px' }}>
+                <a href={`/inv/${inv.id}`} target="_blank" rel="noopener noreferrer" style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--heading)', textDecoration: 'none' }}>
+                  {inv.invoice_number}
+                </a>
+                <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                  {new Date(inv.created_at).toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' })}
+                </span>
+                <div style={{ textAlign: 'right' }}>
+                  <span style={{ fontWeight: 700, color: 'var(--text)' }}>{formatNaira(inv.total)}</span>
+                  {!inv.paid && paid > 0 && (
+                    <p style={{ margin: 0, fontSize: 11, color: 'var(--text-faint)' }}>
+                      {formatNaira(paid)} paid · {formatNaira(remaining)} left
+                    </p>
+                  )}
+                  {inv.paid && inv.paid_at && (
+                    <p style={{ margin: 0, fontSize: 11, color: 'var(--text-faint)' }}>
+                      Paid {new Date(inv.paid_at).toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    </p>
+                  )}
+                </div>
+                <span style={{
+                  fontSize: 11, padding: '3px 9px', borderRadius: 12, fontWeight: 700,
+                  background: inv.paid ? 'var(--success-bg)' : 'var(--orange-bg)',
+                  color: inv.paid ? 'var(--success)' : 'var(--orange-dark)',
+                }}>
+                  {inv.paid ? 'PAID' : 'UNPAID'}
+                </span>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {!inv.paid && (
+                    <button
+                      onClick={() => setRecordingPaymentFor(inv)}
+                      style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '6px 10px', fontSize: 11.5, cursor: 'pointer', fontWeight: 600 }}
+                    >
+                      Record payment
+                    </button>
+                  )}
+                  {invPayments.length > 0 && (
+                    <button
+                      onClick={() => setExpandedInvoice(isExpanded ? null : inv.id)}
+                      style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '6px 10px', fontSize: 11.5, cursor: 'pointer', fontWeight: 600 }}
+                    >
+                      {isExpanded ? 'Hide' : 'Payments'} ({invPayments.length})
+                    </button>
+                  )}
+                </div>
+              </div>
+              {isExpanded && (
+                <div style={{ background: 'var(--bg)', padding: '4px 16px 10px 16px' }}>
+                  {invPayments.map((p) => (
+                    <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: 12.5 }}>
+                      <span style={{ color: 'var(--text-muted)' }}>
+                        {new Date(p.created_at).toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' })} · {PAYMENT_METHOD_LABELS[p.method] || p.method}
+                      </span>
+                      <span style={{ fontWeight: 600, color: 'var(--text)' }}>{formatNaira(p.amount)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {editing && (
@@ -247,6 +321,14 @@ export default function CustomerDetailPage() {
         </div>
       )}
       {showUpgrade && <UpgradeModal onClose={() => setShowUpgrade(false)} />}
+      {recordingPaymentFor && (
+        <RecordPaymentModal
+          invoice={recordingPaymentFor}
+          alreadyPaid={paidSoFar(recordingPaymentFor.id)}
+          onClose={() => setRecordingPaymentFor(null)}
+          onRecorded={() => { setRecordingPaymentFor(null); load(); }}
+        />
+      )}
     </DashboardShell>
   );
 }

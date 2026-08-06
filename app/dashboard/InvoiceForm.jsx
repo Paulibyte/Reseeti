@@ -3,24 +3,26 @@
 import { useEffect, useState } from 'react';
 import { createClient } from '../../lib/supabaseClient';
 import { queueDraftInvoice, syncQueue } from '../../lib/offlineQueue';
+import { parkSale } from '../../lib/parkedSales';
 import { track } from '../../lib/analytics';
 import { formatNaira, formatRate } from '../../lib/format';
 import BarcodeScanInput from '../components/BarcodeScanInput';
 import CameraBarcodeScanner, { isCameraScanningSupported } from '../components/CameraBarcodeScanner';
+import { csrfFetch } from '../../lib/csrfFetch';
 
-export default function InvoiceForm({ business, onClose, onSaved }) {
+export default function InvoiceForm({ business, onClose, onSaved, resumeDraft, onParked }) {
   const supabase = createClient();
   // 'walkin' = quick sale, no customer profile attached (existing default
   // behavior, preserved for speed). 'existing' = picked someone from the
   // dropdown. 'new' = filling out a fresh profile inline before invoicing.
-  const [customerMode, setCustomerMode] = useState('walkin');
-  const [customerId, setCustomerId] = useState(null);
-  const [customerName, setCustomerName] = useState('');
-  const [customerPhone, setCustomerPhone] = useState('');
-  const [newCustomer, setNewCustomer] = useState({ name: '', phone: '', email: '', address: '', tax_id: '', notes: '' });
+  const [customerMode, setCustomerMode] = useState(resumeDraft?.customerMode || 'walkin');
+  const [customerId, setCustomerId] = useState(resumeDraft?.customerId ?? null);
+  const [customerName, setCustomerName] = useState(resumeDraft?.customerName || '');
+  const [customerPhone, setCustomerPhone] = useState(resumeDraft?.customerPhone || '');
+  const [newCustomer, setNewCustomer] = useState(resumeDraft?.newCustomer || { name: '', phone: '', email: '', address: '', tax_id: '', notes: '' });
   const [savingCustomer, setSavingCustomer] = useState(false);
   const [customerError, setCustomerError] = useState('');
-  const [items, setItems] = useState([{ description: '', qty: 1, price: '', product_id: null }]);
+  const [items, setItems] = useState(resumeDraft?.items || [{ description: '', qty: 1, price: '', product_id: null }]);
   const [aiText, setAiText] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
@@ -28,20 +30,21 @@ export default function InvoiceForm({ business, onClose, onSaved }) {
   const [scanError, setScanError] = useState('');
   const [showCameraScanner, setShowCameraScanner] = useState(false);
   const cameraSupported = typeof window !== 'undefined' && isCameraScanningSupported();
-  const [discount, setDiscount] = useState(0);
-  const [shippingFee, setShippingFee] = useState(0);
-  const [serviceChargeEnabled, setServiceChargeEnabled] = useState(business.service_charge_enabled || false);
-  const [serviceChargeRate, setServiceChargeRate] = useState(business.default_service_charge_rate ?? 0);
-  const [vatEnabled, setVatEnabled] = useState(business.vat_enabled || false);
-  const [vatRate, setVatRate] = useState(business.default_vat_rate ?? 7.5);
-  const [whtEnabled, setWhtEnabled] = useState(business.withholding_tax_enabled || false);
-  const [whtRate, setWhtRate] = useState(business.default_withholding_tax_rate ?? 0);
-  const [estimatedDeliveryDate, setEstimatedDeliveryDate] = useState('');
+  const [discount, setDiscount] = useState(resumeDraft?.discount ?? 0);
+  const [shippingFee, setShippingFee] = useState(resumeDraft?.shippingFee ?? 0);
+  const [serviceChargeEnabled, setServiceChargeEnabled] = useState(resumeDraft ? resumeDraft.serviceChargeEnabled : (business.service_charge_enabled || false));
+  const [serviceChargeRate, setServiceChargeRate] = useState(resumeDraft?.serviceChargeRate ?? (business.default_service_charge_rate ?? 0));
+  const [vatEnabled, setVatEnabled] = useState(resumeDraft ? resumeDraft.vatEnabled : (business.vat_enabled || false));
+  const [vatRate, setVatRate] = useState(resumeDraft?.vatRate ?? (business.default_vat_rate ?? 7.5));
+  const [whtEnabled, setWhtEnabled] = useState(resumeDraft ? resumeDraft.whtEnabled : (business.withholding_tax_enabled || false));
+  const [whtRate, setWhtRate] = useState(resumeDraft?.whtRate ?? (business.default_withholding_tax_rate ?? 0));
+  const [estimatedDeliveryDate, setEstimatedDeliveryDate] = useState(resumeDraft?.estimatedDeliveryDate || '');
   const [saving, setSaving] = useState(false);
+  const [parking, setParking] = useState(false);
   const [products, setProducts] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [loyaltyPurchaseCount, setLoyaltyPurchaseCount] = useState(null);
-  const [loyaltyDiscountApplied, setLoyaltyDiscountApplied] = useState(true);
+  const [loyaltyDiscountApplied, setLoyaltyDiscountApplied] = useState(resumeDraft ? resumeDraft.loyaltyDiscountApplied : true);
 
   useEffect(() => {
     // Loaded once so item rows can offer inventory picks (native
@@ -222,7 +225,7 @@ export default function InvoiceForm({ business, onClose, onSaved }) {
     setAiError('');
     setAiWarnings([]);
     try {
-      const res = await fetch('/api/ai/parse-invoice', {
+      const res = await csrfFetch('/api/ai/parse-invoice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: aiText }),
@@ -280,6 +283,23 @@ export default function InvoiceForm({ business, onClose, onSaved }) {
       return { level: 'danger', text: `Only ${product.stock_qty} in stock` };
     }
     return null;
+  }
+
+  // Snapshots the raw, still-editable form state (not a computed invoice
+  // draft — parking happens mid-cart, before checkout) so resuming later
+  // restores exactly what was on screen, not a submitted sale's totals.
+  async function parkCurrentSale() {
+    setParking(true);
+    await parkSale({
+      customerMode, customerId, customerName, customerPhone, newCustomer,
+      items, discount, shippingFee,
+      serviceChargeEnabled, serviceChargeRate,
+      vatEnabled, vatRate, whtEnabled, whtRate,
+      estimatedDeliveryDate, loyaltyDiscountApplied,
+    }, customerMode === 'walkin' ? 'Walk-in' : customerName);
+    setParking(false);
+    track('sale_parked', {});
+    onParked?.();
   }
 
   async function save() {
@@ -640,9 +660,17 @@ export default function InvoiceForm({ business, onClose, onSaved }) {
         </p>
       </div>
 
-      <div style={{ display: 'flex', gap: 10 }}>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         <button onClick={save} disabled={saving} style={{ background: 'var(--orange)', color: '#fff', border: 'none', padding: '10px 18px', borderRadius: 4, fontWeight: 700, cursor: 'pointer' }}>
           {saving ? 'Saving…' : 'Save invoice'}
+        </button>
+        <button
+          onClick={parkCurrentSale}
+          disabled={parking}
+          title="Set this sale aside and serve someone else — resume it later from Parked sales"
+          style={{ background: 'none', border: '1px solid var(--orange)', color: 'var(--orange-dark)', padding: '10px 18px', borderRadius: 4, fontWeight: 700, cursor: 'pointer' }}
+        >
+          {parking ? 'Parking…' : '⏸ Park sale'}
         </button>
         <button onClick={onClose} style={{ background: 'none', border: '1px solid var(--border)', padding: '10px 18px', borderRadius: 4, cursor: 'pointer', color: 'var(--text)' }}>
           Cancel

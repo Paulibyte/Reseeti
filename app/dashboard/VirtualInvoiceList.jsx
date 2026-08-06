@@ -23,6 +23,7 @@ export default function VirtualInvoiceList({
   supabase,
   businessId,
   role,
+  overrides,
   refreshToken,
   onTogglePaid,
   onDelete,
@@ -140,6 +141,7 @@ export default function VirtualInvoiceList({
           inv={inv}
           isLast={index === rows.length - 1}
           role={role}
+          overrides={overrides}
           reminding={reminding}
           onTogglePaid={onTogglePaid}
           onDelete={onDelete}
@@ -162,7 +164,7 @@ export default function VirtualInvoiceList({
   );
 }
 
-function InvoiceRow({ inv, isLast, role, reminding, onTogglePaid, onDelete, onRemind }) {
+function InvoiceRow({ inv, isLast, role, overrides, reminding, onTogglePaid, onDelete, onRemind }) {
   return (
     <div
       style={{
@@ -194,13 +196,13 @@ function InvoiceRow({ inv, isLast, role, reminding, onTogglePaid, onDelete, onRe
       )}
       <button
         onClick={() => onTogglePaid(inv)}
-        disabled={!can(role, 'markInvoicePaid')}
+        disabled={!can(role, 'markInvoicePaid', overrides)}
         style={{
           fontSize: 11,
           padding: '4px 10px',
           borderRadius: 12,
           border: 'none',
-          cursor: can(role, 'markInvoicePaid') ? 'pointer' : 'default',
+          cursor: can(role, 'markInvoicePaid', overrides) ? 'pointer' : 'default',
           background: inv.paid ? 'var(--success-bg)' : 'var(--orange-bg)',
           color: inv.paid ? 'var(--success)' : 'var(--orange-dark)',
           fontWeight: 700,
@@ -208,7 +210,7 @@ function InvoiceRow({ inv, isLast, role, reminding, onTogglePaid, onDelete, onRe
       >
         {inv.paid ? 'PAID' : 'UNPAID'}
       </button>
-      {can(role, 'deleteInvoice') && (
+      {can(role, 'deleteInvoice', overrides) && (
         <button
           onClick={() => onDelete(inv)}
           title="Delete invoice"

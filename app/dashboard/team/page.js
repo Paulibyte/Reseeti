@@ -7,6 +7,14 @@ import { getMyBusiness } from '../../../lib/getMyBusiness';
 import DashboardShell from '../DashboardShell';
 import { can, ROLE_LABELS, ASSIGNABLE_ROLES, PERMISSION_LABELS, PERMISSION_ORDER, permissionsFor } from '../../../lib/permissions';
 
+// Number of permissions a member's overrides have actually pulled away
+// from their role's default — used for the "+2 custom" badge in the
+// member list, so an owner can spot at a glance who's been individually
+// tuned without opening every row.
+function overrideCount(overrides) {
+  return Object.keys(overrides || {}).length;
+}
+
 // Converts a Nigerian local number (08012345678) to E.164 format
 // (+2348012345678), matching the format the login page's OTP flow uses —
 // invites are keyed on phone, so this must match exactly or a staff
@@ -37,6 +45,7 @@ export default function TeamPage() {
   const router = useRouter();
   const [business, setBusiness] = useState(null);
   const [role, setRole] = useState(null);
+  const [overrides, setOverrides] = useState({});
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showInvite, setShowInvite] = useState(false);
@@ -47,14 +56,18 @@ export default function TeamPage() {
   const [error, setError] = useState('');
   const [expandedRole, setExpandedRole] = useState(null);
   const [changingRoleFor, setChangingRoleFor] = useState(null);
+  const [editingPermsFor, setEditingPermsFor] = useState(null);
+  const [permDraft, setPermDraft] = useState({});
+  const [savingPerms, setSavingPerms] = useState(false);
 
   useEffect(() => { load(); }, []);
 
   async function load() {
-    const { user, business: biz, role: myRole } = await getMyBusiness(supabase);
+    const { user, business: biz, role: myRole, overrides: myOverrides } = await getMyBusiness(supabase);
     if (!user) { router.push('/login'); return; }
     setBusiness(biz);
     setRole(myRole);
+    setOverrides(myOverrides || {});
 
     if (biz) {
       const { data: mem } = await supabase
@@ -122,6 +135,52 @@ export default function TeamPage() {
     load();
   }
 
+  function openPermEditor(member) {
+    setEditingPermsFor(member);
+    // Start from exactly what's stored — not the merged/effective view —
+    // so toggling one flag and saving doesn't accidentally freeze every
+    // other flag's current role-derived value in as an explicit override
+    // it would then no longer track if the role itself changes later.
+    setPermDraft({ ...(member.permission_overrides || {}) });
+  }
+
+  // Toggling a flag either adds/updates an explicit override, or — if the
+  // new value matches what the role would already give them — removes
+  // the override entirely. This is what keeps permission_overrides sparse
+  // (only genuinely customized flags), so a role's own template stays the
+  // source of truth for everything an owner hasn't deliberately touched.
+  function togglePerm(perm) {
+    if (!editingPermsFor) return;
+    const roleDefault = can(editingPermsFor.role, perm);
+    const currentlyEffective = can(editingPermsFor.role, perm, permDraft);
+    const nextValue = !currentlyEffective;
+    setPermDraft((prev) => {
+      const next = { ...prev };
+      if (nextValue === roleDefault) {
+        delete next[perm];
+      } else {
+        next[perm] = nextValue;
+      }
+      return next;
+    });
+  }
+
+  async function savePerms() {
+    if (!editingPermsFor) return;
+    setSavingPerms(true);
+    const { error: err } = await supabase
+      .from('business_members')
+      .update({ permission_overrides: permDraft })
+      .eq('id', editingPermsFor.id);
+    setSavingPerms(false);
+    if (err) {
+      alert(`Couldn't save permissions: ${err.message}`);
+      return;
+    }
+    setEditingPermsFor(null);
+    load();
+  }
+
   if (loading || !business) {
     return <main style={{ padding: 40, color: 'var(--text-muted)' }}>Loading…</main>;
   }
@@ -130,16 +189,16 @@ export default function TeamPage() {
   // (Sidebar only shows "Team" to roles with manageTeam), but someone
   // could still type the URL directly, so this is a real guard, not just
   // a UI nicety. The database-level RLS backs this up independently too.
-  if (!can(role, 'manageTeam')) {
+  if (!can(role, 'manageTeam', overrides)) {
     return (
-      <DashboardShell plan={business.plan} role={role} onSignOut={signOut}>
+      <DashboardShell plan={business.plan} role={role} overrides={overrides} onSignOut={signOut}>
         <p style={{ color: 'var(--text-muted)' }}>You don&apos;t have permission to manage the team.</p>
       </DashboardShell>
     );
   }
 
   return (
-    <DashboardShell plan={business.plan} role={role} onSignOut={signOut}>
+    <DashboardShell plan={business.plan} role={role} overrides={overrides} onSignOut={signOut}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h1 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', fontSize: 22, margin: 0 }}>
           Team
@@ -197,6 +256,11 @@ export default function TeamPage() {
                 {m.label ? `${m.phone} · ` : ''}
                 {ROLE_LABELS[m.role] || m.role}
                 {m.status === 'invited' ? ' · Invited, not yet joined' : ''}
+                {overrideCount(m.permission_overrides) > 0 && (
+                  <span style={{ color: 'var(--orange-dark)', fontWeight: 700 }}>
+                    {' · '}+{overrideCount(m.permission_overrides)} custom
+                  </span>
+                )}
               </p>
             </div>
             {m.role !== 'owner' && (
@@ -213,6 +277,12 @@ export default function TeamPage() {
                     {ASSIGNABLE_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
                   </select>
                 )}
+                <button
+                  onClick={() => openPermEditor(m)}
+                  style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: 6, padding: '6px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}
+                >
+                  Permissions
+                </button>
                 <button
                   onClick={() => removeMember(m)}
                   style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--danger)', borderRadius: 6, padding: '6px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}
@@ -271,6 +341,67 @@ export default function TeamPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {editingPermsFor && (
+        <div style={{ position: 'fixed', inset: 0, background: 'var(--overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 50 }}>
+          <div style={{ background: 'var(--surface)', borderRadius: 10, padding: 24, maxWidth: 420, width: '100%', borderTop: '5px solid var(--orange)', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+            <h3 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', marginTop: 0, marginBottom: 2 }}>
+              {editingPermsFor.label || editingPermsFor.phone}&apos;s permissions
+            </h3>
+            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 0, marginBottom: 14, lineHeight: 1.5 }}>
+              Starts from what a {ROLE_LABELS[editingPermsFor.role]?.toLowerCase()} normally gets. Untick or tick
+              anything to give this person a custom exception — everything else stays tied to their role.
+            </p>
+            <div style={{ overflowY: 'auto', flex: 1, marginBottom: 14 }}>
+              {PERMISSION_ORDER.map((p) => {
+                const roleDefault = can(editingPermsFor.role, p);
+                const effective = can(editingPermsFor.role, p, permDraft);
+                const isCustom = Object.prototype.hasOwnProperty.call(permDraft, p);
+                return (
+                  <label
+                    key={p}
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+                      padding: '9px 4px', borderBottom: '1px solid var(--border)', cursor: 'pointer', fontSize: 13.5,
+                    }}
+                  >
+                    <span style={{ color: 'var(--text)' }}>
+                      {PERMISSION_LABELS[p]}
+                      {isCustom && (
+                        <span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 700, color: 'var(--orange-dark)', textTransform: 'uppercase' }}>
+                          custom
+                        </span>
+                      )}
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={effective}
+                      onChange={() => togglePerm(p)}
+                      style={{ width: 18, height: 18, cursor: 'pointer', accentColor: 'var(--orange)' }}
+                    />
+                  </label>
+                );
+              })}
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                onClick={savePerms}
+                disabled={savingPerms}
+                style={{ background: 'var(--orange)', color: '#fff', border: 'none', padding: '10px 18px', borderRadius: 6, fontWeight: 700, cursor: 'pointer' }}
+              >
+                {savingPerms ? 'Saving…' : 'Save permissions'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditingPermsFor(null)}
+                style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text)', padding: '10px 18px', borderRadius: 6, cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}

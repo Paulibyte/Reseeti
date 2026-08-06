@@ -12,6 +12,7 @@ import AiInsights from './AiInsights';
 import OnboardingChecklist from './OnboardingChecklist';
 import { useRealtimeSync } from '../../lib/useRealtimeSync';
 import { getQueue, syncQueue, pendingCount, onBackgroundSyncMessage, getEditConflicts } from '../../lib/offlineQueue';
+import { listParkedSales } from '../../lib/parkedSales';
 import { cacheGetAll, cacheSetAll } from '../../lib/idbCache';
 import { track } from '../../lib/analytics';
 import { formatNaira } from '../../lib/format';
@@ -32,6 +33,7 @@ const BusinessSettings = dynamic(() => import('./BusinessSettings'), { ssr: fals
 const UpgradeModal = dynamic(() => import('./UpgradeModal'), { ssr: false });
 const MarkPaidModal = dynamic(() => import('./MarkPaidModal'), { ssr: false });
 const SyncConflictModal = dynamic(() => import('./SyncConflictModal'), { ssr: false });
+const ParkedSalesPanel = dynamic(() => import('./ParkedSalesPanel'), { ssr: false });
 
 function greetingForHour(hour) {
   if (hour < 12) return 'Good Morning';
@@ -44,9 +46,13 @@ export default function Dashboard() {
   const router = useRouter();
   const [business, setBusiness] = useState(null);
   const [role, setRole] = useState(null);
+  const [overrides, setOverrides] = useState({});
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [resumeDraft, setResumeDraft] = useState(null);
+  const [showParkedSales, setShowParkedSales] = useState(false);
+  const [parkedCount, setParkedCount] = useState(0);
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [markingPaidInvoice, setMarkingPaidInvoice] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -72,6 +78,7 @@ export default function Dashboard() {
     setIsOnline(navigator.onLine);
     setQueuedDrafts(getQueue());
     setEditConflicts(getEditConflicts());
+    refreshParkedCount();
 
     const handleOnline = () => { setIsOnline(true); attemptSync(); };
     const handleOffline = () => setIsOnline(false);
@@ -151,13 +158,25 @@ export default function Dashboard() {
     load();
   }
 
+  async function refreshParkedCount() {
+    const parked = await listParkedSales();
+    setParkedCount(parked.length);
+  }
+
+  function resumeSale(draft) {
+    setResumeDraft(draft);
+    setShowParkedSales(false);
+    setShowForm(true);
+  }
+
   async function load() {
-    const { user, business: biz, role: myRole } = await getMyBusiness(supabase);
+    const { user, business: biz, role: myRole, overrides: myOverrides } = await getMyBusiness(supabase);
     if (!user) { router.push('/login'); return; }
     if (!biz) { setLoading(false); return; }
 
     setBusiness(biz);
     setRole(myRole);
+    setOverrides(myOverrides || {});
 
     // Paint from the last cached snapshot immediately (IndexedDB read is
     // async but fast — no network round trip), then let the network
@@ -313,9 +332,10 @@ export default function Dashboard() {
     <DashboardShell
       plan={business.plan}
       role={role}
-      onUpgradeClick={can(role, 'manageSubscription') ? () => setShowUpgrade(true) : undefined}
-      onSettingsClick={can(role, 'manageSettings') ? () => setShowSettings(true) : undefined}
-      onCreateInvoice={can(role, 'createInvoice') ? () => (atLimit ? (can(role, 'manageSubscription') && setShowUpgrade(true)) : setShowForm(true)) : undefined}
+      overrides={overrides}
+      onUpgradeClick={can(role, 'manageSubscription', overrides) ? () => setShowUpgrade(true) : undefined}
+      onSettingsClick={can(role, 'manageSettings', overrides) ? () => setShowSettings(true) : undefined}
+      onCreateInvoice={can(role, 'createInvoice', overrides) ? () => (atLimit ? (can(role, 'manageSubscription', overrides) && setShowUpgrade(true)) : setShowForm(true)) : undefined}
       onSignOut={signOut}
       notifications={notifications}
     >
@@ -336,7 +356,7 @@ export default function Dashboard() {
       </div>
       <p style={{ color: 'var(--text-muted)', margin: '0 0 22px', fontSize: 14.5 }}>Here&apos;s your business today.</p>
 
-      {can(role, 'manageSettings') && (
+      {can(role, 'manageSettings', overrides) && (
         <OnboardingChecklist supabase={supabase} business={business} onOpenSettings={() => setShowSettings(true)} />
       )}
 
@@ -400,7 +420,7 @@ export default function Dashboard() {
             🚫 {planLimitBlockedCount} queued invoice{planLimitBlockedCount === 1 ? '' : 's'} couldn&apos;t sync — you&apos;ve
             reached this month&apos;s free plan limit. Upgrade to Pro to record {planLimitBlockedCount === 1 ? 'it' : 'them'}.
           </span>
-          {can(role, 'manageSubscription') && (
+          {can(role, 'manageSubscription', overrides) && (
             <button
               onClick={() => setShowUpgrade(true)}
               style={{ background: 'var(--danger)', color: '#fff', border: 'none', borderRadius: 6, padding: '5px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap' }}
@@ -449,7 +469,7 @@ export default function Dashboard() {
         <StatCard label="Collected" value={formatNaira(moneyCollected)} accent="var(--success)" />
       </div>
 
-      {can(role, 'viewAnalytics') && <AiInsights businessId={business.id} />}
+      {can(role, 'viewAnalytics', overrides) && <AiInsights businessId={business.id} />}
 
       {business.plan === 'pro' && business.plan_grace_until && (
         <div style={{ background: 'var(--danger-bg, #fdecea)', border: '1px solid var(--danger)', borderRadius: 8, padding: 16, marginBottom: 20 }}>
@@ -459,7 +479,7 @@ export default function Dashboard() {
             {new Date(business.plan_grace_until).toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' })}{' '}
             unless payment is updated.
           </span>
-          {can(role, 'manageSubscription') && (
+          {can(role, 'manageSubscription', overrides) && (
             <div style={{ marginTop: 10 }}>
               <button
                 onClick={() => setShowUpgrade(true)}
@@ -482,9 +502,9 @@ export default function Dashboard() {
         <div style={{ background: 'var(--orange-bg)', border: '1px solid var(--orange)', borderRadius: 8, padding: 16, marginBottom: 20 }}>
           <strong style={{ color: 'var(--text)' }}>You&apos;ve hit this month&apos;s free limit.</strong>{' '}
           <span style={{ color: 'var(--text)' }}>
-            {can(role, 'manageSubscription') ? 'Upgrade to Reseeti Pro to keep billing.' : 'Ask the business owner to upgrade to Reseeti Pro to keep billing.'}
+            {can(role, 'manageSubscription', overrides) ? 'Upgrade to Reseeti Pro to keep billing.' : 'Ask the business owner to upgrade to Reseeti Pro to keep billing.'}
           </span>
-          {can(role, 'manageSubscription') && (
+          {can(role, 'manageSubscription', overrides) && (
             <div style={{ marginTop: 10 }}>
               <button
                 onClick={() => setShowUpgrade(true)}
@@ -499,28 +519,49 @@ export default function Dashboard() {
 
       <div id="invoices" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
         <h3 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', margin: 0, fontSize: 17 }}>Invoices</h3>
-        {!atLimit && can(role, 'createInvoice') && (
-          <button
-            onClick={() => setShowForm(true)}
-            style={{ background: 'var(--orange)', color: '#fff', border: 'none', padding: '9px 16px', borderRadius: 8, fontWeight: 700, cursor: 'pointer', fontSize: 13.5 }}
-          >
-            + Create Invoice
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {parkedCount > 0 && (
+            <button
+              onClick={() => setShowParkedSales(true)}
+              style={{ background: 'var(--orange-bg)', color: 'var(--orange-dark)', border: '1px solid var(--orange)', padding: '9px 14px', borderRadius: 8, fontWeight: 700, cursor: 'pointer', fontSize: 13 }}
+            >
+              ⏸ Parked ({parkedCount})
+            </button>
+          )}
+          {!atLimit && can(role, 'createInvoice', overrides) && (
+            <button
+              onClick={() => { setResumeDraft(null); setShowForm(true); }}
+              style={{ background: 'var(--orange)', color: '#fff', border: 'none', padding: '9px 16px', borderRadius: 8, fontWeight: 700, cursor: 'pointer', fontSize: 13.5 }}
+            >
+              + Create Invoice
+            </button>
+          )}
+        </div>
       </div>
 
       {showForm && (
         <InvoiceForm
           business={business}
-          onClose={() => setShowForm(false)}
+          resumeDraft={resumeDraft}
+          onClose={() => { setShowForm(false); setResumeDraft(null); }}
+          onParked={() => { setShowForm(false); setResumeDraft(null); refreshParkedCount(); }}
           onSaved={(depleted) => {
             setShowForm(false);
+            setResumeDraft(null);
             setQueuedDrafts(getQueue());
             attemptSync();
             load();
             setInvoiceRefreshToken((t) => t + 1);
             if (depleted && depleted.length) setDepletedNotice(depleted);
           }}
+        />
+      )}
+
+      {showParkedSales && (
+        <ParkedSalesPanel
+          onClose={() => setShowParkedSales(false)}
+          onResume={resumeSale}
+          onChanged={refreshParkedCount}
         />
       )}
 
@@ -537,6 +578,7 @@ export default function Dashboard() {
           supabase={supabase}
           businessId={business.id}
           role={role}
+          overrides={overrides}
           refreshToken={invoiceRefreshToken}
           onTogglePaid={togglePaid}
           onDelete={deleteInvoiceRow}

@@ -1,0 +1,31 @@
+-- Stage 28 migration: run in the Supabase SQL editor after schema_stage27
+-- (or whatever your latest applied stage is).
+--
+-- Per-user custom permission overrides, on top of the five role
+-- templates introduced in Stage 18. Until now every staff member's
+-- abilities came entirely from whichever fixed role (owner/manager/
+-- cashier/salesperson/accountant) they were assigned in
+-- lib/permissions.js's ROLE_PERMISSIONS matrix — an owner had no way to
+-- give one specific cashier extra access (e.g. viewing reports) without
+-- promoting them to manager and handing them everything a manager gets.
+--
+-- Stored as a single jsonb column keyed by permission name -> true/false.
+-- A key's absence means "use the role default" — see can() in
+-- lib/permissions.js, which checks this column first and only falls back
+-- to the role matrix for permissions the owner hasn't explicitly
+-- touched. Only the flags actually flipped away from the role default
+-- are ever written here (see team/page.js's save handler), so this stays
+-- small and the role template remains the source of truth for anything
+-- untouched — exactly the same "one real matrix, everything else reads
+-- from it" design as the rest of this permission system.
+--
+-- Deliberately NOT a new RLS policy per permission: as Stage 18 already
+-- noted, most of these 12 flags are enforced at the application layer
+-- (which pages/buttons render), not the database layer, and overrides
+-- extend that same existing, documented model rather than introducing a
+-- second one. Role escalation ('owner'/'manager') is untouched — that
+-- stays governed entirely by the role column and Stage 18's
+-- prevent_role_escalation trigger; overrides only ever adjust the fixed,
+-- already-enumerated set of permission flags, never the role itself.
+alter table business_members
+  add column if not exists permission_overrides jsonb not null default '{}'::jsonb;

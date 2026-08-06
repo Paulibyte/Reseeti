@@ -23,19 +23,26 @@ const PAGE_SIZE = 25;
 const UpgradeModal = dynamic(() => import('../UpgradeModal'), { ssr: false });
 const ProductForm = dynamic(() => import('./ProductForm'), { ssr: false });
 const ImportModal = dynamic(() => import('../ImportModal'), { ssr: false });
+const StockAdjustModal = dynamic(() => import('./StockAdjustModal'), { ssr: false });
+const StockHistoryModal = dynamic(() => import('./StockHistoryModal'), { ssr: false });
 
 export default function InventoryPage() {
   const supabase = createClient();
   const router = useRouter();
   const [business, setBusiness] = useState(null);
   const [role, setRole] = useState(null);
+  const [overrides, setOverrides] = useState({});
   const [products, setProducts] = useState([]);
+  const [memberNames, setMemberNames] = useState({});
   const [loading, setLoading] = useState(true);
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
+  const [addVariantTo, setAddVariantTo] = useState(null); // { familyId, familyName } | null
   const [showImport, setShowImport] = useState(false);
+  const [adjustingProduct, setAdjustingProduct] = useState(null);
+  const [historyProduct, setHistoryProduct] = useState(null);
   const [page, setPage] = useState(0);
 
   useEffect(() => { load(); }, []);
@@ -62,10 +69,11 @@ export default function InventoryPage() {
   });
 
   async function load() {
-    const { user, business: biz, role: myRole } = await getMyBusiness(supabase);
+    const { user, business: biz, role: myRole, overrides: myOverrides } = await getMyBusiness(supabase);
     if (!user) { router.push('/login'); return; }
     setBusiness(biz);
     setRole(myRole);
+    setOverrides(myOverrides || {});
 
     const cachedProducts = await cacheGetAll('products', biz.id);
     if (cachedProducts.length) {
@@ -81,6 +89,19 @@ export default function InventoryPage() {
     setProducts(prods || []);
     cacheSetAll('products', biz.id, prods || []);
     setLoading(false);
+
+    // For resolving "who" in stock history (StockHistoryModal) without
+    // a per-open fetch — a small, fairly static list, fine to load once
+    // alongside the product catalog itself.
+    const { data: members } = await supabase
+      .from('business_members')
+      .select('user_id, label, phone')
+      .eq('business_id', biz.id);
+    const names = {};
+    for (const m of members || []) {
+      names[m.user_id] = m.label || m.phone || 'A team member';
+    }
+    setMemberNames(names);
   }
 
   async function signOut() {
@@ -114,23 +135,41 @@ export default function InventoryPage() {
       (p.barcode || '').toLowerCase().includes(q)
     );
   });
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const pageItems = filtered.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
+
+  // Group variants of the same item (Stage 30's family_id) together so
+  // "Rice 25kg" and "Rice 50kg" render as one card with two size rows,
+  // not two unrelated products. A search match on any variant keeps the
+  // whole family visible (so searching "rice" doesn't hide the 50kg
+  // size just because the match was on the 25kg one's name/barcode).
+  const familyOrder = [];
+  const familyMap = {};
+  for (const p of filtered) {
+    const key = p.family_id || p.id;
+    if (!familyMap[key]) {
+      familyMap[key] = [];
+      familyOrder.push(key);
+    }
+    familyMap[key].push(p);
+  }
+  const families = familyOrder.map((key) => familyMap[key].sort((a, b) => (a.unit_value || 0) - (b.unit_value || 0)));
+
+  const totalPages = Math.max(1, Math.ceil(families.length / PAGE_SIZE));
+  const pageFamilies = families.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
 
   if (loading || !business) {
     return <main style={{ padding: 40, color: 'var(--text-muted)' }}>Loading…</main>;
   }
 
-  if (!can(role, 'manageInventory')) {
+  if (!can(role, 'manageInventory', overrides)) {
     return (
-      <DashboardShell plan={business.plan} role={role} onSignOut={signOut}>
+      <DashboardShell plan={business.plan} role={role} overrides={overrides} onSignOut={signOut}>
         <p style={{ color: 'var(--text-muted)' }}>You don&apos;t have permission to view this page.</p>
       </DashboardShell>
     );
   }
 
   return (
-    <DashboardShell plan={business.plan} role={role} onSignOut={signOut} onUpgradeClick={() => setShowUpgrade(true)}>
+    <DashboardShell plan={business.plan} role={role} overrides={overrides} onSignOut={signOut} onUpgradeClick={() => setShowUpgrade(true)}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h1 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', fontSize: 22, margin: 0 }}>
           Inventory
@@ -143,7 +182,7 @@ export default function InventoryPage() {
             ⬆ Import
           </button>
           <button
-            onClick={() => { setEditingProduct(null); setShowForm(true); }}
+            onClick={() => { setEditingProduct(null); setAddVariantTo(null); setShowForm(true); }}
             style={{ background: 'var(--orange)', color: '#fff', border: 'none', padding: '9px 16px', borderRadius: 8, fontWeight: 700, fontSize: 13.5, cursor: 'pointer' }}
           >
             + Add product
@@ -187,52 +226,101 @@ export default function InventoryPage() {
             {products.length === 0 ? 'No products yet — add your first one to start tracking stock.' : 'No matches.'}
           </p>
         )}
-        {pageItems.map((p, idx) => {
-          const isOut = Number(p.stock_qty) <= 0;
-          const isLow = !isOut && Number(p.stock_qty) <= Number(p.low_stock_threshold);
+        {pageFamilies.map((variants, fIdx) => {
+          const primary = variants[0];
+          const isFamily = variants.length > 1;
           return (
             <div
-              key={p.id}
-              style={{
-                display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 10,
-                padding: '13px 16px', borderBottom: idx === pageItems.length - 1 ? 'none' : '1px solid var(--border)',
-              }}
+              key={primary.family_id || primary.id}
+              style={{ borderBottom: fIdx === pageFamilies.length - 1 ? 'none' : '1px solid var(--border)' }}
             >
-              <div>
-                <p style={{ margin: 0, fontWeight: 600, color: 'var(--text)', fontSize: 14.5 }}>{p.name}</p>
-                <p style={{ margin: 0, fontSize: 12, color: 'var(--text-faint)' }}>
-                  {p.category ? `${p.category} · ` : ''}
-                  {p.barcode ? <span style={{ fontFamily: 'monospace' }}>{p.barcode}</span> : 'No barcode'}
-                </p>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                <div style={{ textAlign: 'right' }}>
-                  <p style={{ margin: 0, fontWeight: 700, color: 'var(--text)', fontSize: 14 }}>{formatNaira(p.price)}</p>
-                  <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: isOut ? 'var(--danger)' : isLow ? 'var(--orange-dark)' : 'var(--text-muted)' }}>
-                    {isOut ? 'Out of stock' : `${p.stock_qty} in stock${isLow ? ' — low' : ''}`}
+              {isFamily && (
+                <div style={{ padding: '10px 16px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <p style={{ margin: 0, fontWeight: 700, color: 'var(--text)', fontSize: 14.5 }}>
+                    {primary.name} <span style={{ fontWeight: 500, color: 'var(--text-faint)', fontSize: 12 }}>({variants.length} sizes)</span>
                   </p>
-                </div>
-                <div style={{ display: 'flex', gap: 6 }}>
                   <button
-                    onClick={() => { setEditingProduct(p); setShowForm(true); }}
-                    style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '6px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}
+                    onClick={() => { setAddVariantTo({ familyId: primary.family_id || primary.id, familyName: primary.name }); setShowForm(true); }}
+                    style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: 6, padding: '4px 9px', fontSize: 11.5, cursor: 'pointer', fontWeight: 600 }}
                   >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => deleteProduct(p)}
-                    style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--danger)', borderRadius: 6, padding: '6px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}
-                  >
-                    Delete
+                    + Add size
                   </button>
                 </div>
-              </div>
+              )}
+              {variants.map((p, idx) => {
+                const isOut = Number(p.stock_qty) <= 0;
+                const isLow = !isOut && Number(p.stock_qty) <= Number(p.low_stock_threshold);
+                const sizeLabel = p.unit_value ? `${p.unit_value}${p.unit || ''}` : (p.unit || null);
+                return (
+                  <div
+                    key={p.id}
+                    style={{
+                      display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                      padding: isFamily ? '10px 16px 10px 28px' : '13px 16px',
+                      borderTop: isFamily && idx > 0 ? '1px dashed var(--border)' : 'none',
+                    }}
+                  >
+                    <div>
+                      <p style={{ margin: 0, fontWeight: 600, color: 'var(--text)', fontSize: 14.5 }}>
+                        {isFamily ? (sizeLabel || 'Unspecified size') : p.name}
+                      </p>
+                      <p style={{ margin: 0, fontSize: 12, color: 'var(--text-faint)' }}>
+                        {!isFamily && sizeLabel ? `${sizeLabel} · ` : ''}
+                        {p.category ? `${p.category} · ` : ''}
+                        {p.barcode ? <span style={{ fontFamily: 'monospace' }}>{p.barcode}</span> : 'No barcode'}
+                      </p>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                      <div style={{ textAlign: 'right' }}>
+                        <p style={{ margin: 0, fontWeight: 700, color: 'var(--text)', fontSize: 14 }}>{formatNaira(p.price)}</p>
+                        <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: isOut ? 'var(--danger)' : isLow ? 'var(--orange-dark)' : 'var(--text-muted)' }}>
+                          {isOut ? 'Out of stock' : `${p.stock_qty} in stock${isLow ? ' — low' : ''}`}
+                        </p>
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                        <button
+                          onClick={() => setAdjustingProduct(p)}
+                          style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '6px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}
+                        >
+                          Adjust
+                        </button>
+                        <button
+                          onClick={() => setHistoryProduct(p)}
+                          style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '6px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}
+                        >
+                          History
+                        </button>
+                        {!isFamily && (
+                          <button
+                            onClick={() => { setAddVariantTo({ familyId: p.family_id || p.id, familyName: p.name }); setShowForm(true); }}
+                            style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '6px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}
+                          >
+                            + Size
+                          </button>
+                        )}
+                        <button
+                          onClick={() => { setEditingProduct(p); setAddVariantTo(null); setShowForm(true); }}
+                          style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '6px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => deleteProduct(p)}
+                          style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--danger)', borderRadius: 6, padding: '6px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           );
         })}
       </div>
 
-      {filtered.length > PAGE_SIZE && (
+      {families.length > PAGE_SIZE && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14, marginTop: 14 }}>
           <button
             onClick={() => setPage((pg) => Math.max(0, pg - 1))}
@@ -256,9 +344,12 @@ export default function InventoryPage() {
         <ProductForm
           business={business}
           product={editingProduct}
-          onClose={() => setShowForm(false)}
+          familyId={addVariantTo?.familyId}
+          familyName={addVariantTo?.familyName}
+          onClose={() => { setShowForm(false); setAddVariantTo(null); }}
           onSaved={(queuedProduct) => {
             setShowForm(false);
+            setAddVariantTo(null);
             // When ProductForm queued the edit offline (see its
             // _queuedOffline flag), it hands back the patched product so
             // this device's own view updates immediately rather than
@@ -294,6 +385,23 @@ export default function InventoryPage() {
         />
       )}
       {showUpgrade && <UpgradeModal onClose={() => setShowUpgrade(false)} />}
+      {adjustingProduct && (
+        <StockAdjustModal
+          product={adjustingProduct}
+          onClose={() => setAdjustingProduct(null)}
+          onAdjusted={(newStock) => {
+            setProducts((prev) => prev.map((p) => (p.id === adjustingProduct.id ? { ...p, stock_qty: newStock } : p)));
+            setAdjustingProduct(null);
+          }}
+        />
+      )}
+      {historyProduct && (
+        <StockHistoryModal
+          product={historyProduct}
+          memberNames={memberNames}
+          onClose={() => setHistoryProduct(null)}
+        />
+      )}
     </DashboardShell>
   );
 }

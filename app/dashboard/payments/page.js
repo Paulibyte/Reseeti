@@ -69,6 +69,7 @@ export default function PaymentsPage() {
   const router = useRouter();
   const [business, setBusiness] = useState(null);
   const [role, setRole] = useState(null);
+  const [overrides, setOverrides] = useState({});
   const [invoices, setInvoices] = useState([]);
   const [events, setEvents] = useState([]);
   const [eventsError, setEventsError] = useState('');
@@ -78,10 +79,11 @@ export default function PaymentsPage() {
   useEffect(() => { load(); }, []);
 
   async function load() {
-    const { user, business: biz, role: myRole } = await getMyBusiness(supabase);
+    const { user, business: biz, role: myRole, overrides: myOverrides } = await getMyBusiness(supabase);
     if (!user) { router.push('/login'); return; }
     setBusiness(biz);
     setRole(myRole);
+    setOverrides(myOverrides || {});
 
     const { data: invs } = await supabase
       .from('invoices')
@@ -131,9 +133,9 @@ export default function PaymentsPage() {
     return <main style={{ padding: 40, color: 'var(--text-muted)' }}>Loading…</main>;
   }
 
-  if (!can(role, 'manageSubscription')) {
+  if (!can(role, 'manageSubscription', overrides)) {
     return (
-      <DashboardShell plan={business.plan} role={role} onSignOut={signOut}>
+      <DashboardShell plan={business.plan} role={role} overrides={overrides} onSignOut={signOut}>
         <p style={{ color: 'var(--text-muted)' }}>You don&apos;t have permission to view this page.</p>
       </DashboardShell>
     );
@@ -143,7 +145,7 @@ export default function PaymentsPage() {
   const daysToRenew = renewsAt ? Math.ceil((renewsAt - new Date()) / (1000 * 60 * 60 * 24)) : null;
 
   return (
-    <DashboardShell plan={business.plan} role={role} onSignOut={signOut} onUpgradeClick={() => setShowUpgrade(true)}>
+    <DashboardShell plan={business.plan} role={role} overrides={overrides} onSignOut={signOut} onUpgradeClick={() => setShowUpgrade(true)}>
       <h1 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', fontSize: 22, margin: '0 0 16px' }}>
         Payments
       </h1>
