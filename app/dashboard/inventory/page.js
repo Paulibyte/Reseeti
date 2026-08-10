@@ -124,6 +124,29 @@ export default function InventoryPage() {
     [products]
   );
 
+  // Monetary value of everything currently on hand — at what it cost
+  // to stock (cost_price × qty) and at what it would sell for
+  // (price × qty) if sold at full price today. Products with no
+  // cost_price recorded (it's optional — see ProductForm) are counted
+  // in the selling-price total but excluded from the cost total, since
+  // treating a missing cost as ₦0 would understate what's actually
+  // invested in stock rather than just reflect incomplete data.
+  const stockValue = useMemo(() => {
+    let atCost = 0;
+    let atSelling = 0;
+    let missingCostCount = 0;
+    for (const p of products) {
+      const qty = Number(p.stock_qty) || 0;
+      atSelling += qty * (Number(p.price) || 0);
+      if (p.cost_price === null || p.cost_price === undefined || p.cost_price === '') {
+        if (qty > 0) missingCostCount += 1;
+      } else {
+        atCost += qty * Number(p.cost_price);
+      }
+    }
+    return { atCost, atSelling, potentialProfit: atSelling - atCost, missingCostCount };
+  }, [products]);
+
   // Search matches name, category, or an exact/partial barcode — so typing
   // or scanning a code into this same box works as a quick lookup too,
   // without needing a separate "scan" mode.
@@ -187,6 +210,27 @@ export default function InventoryPage() {
           >
             + Add product
           </button>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
+        <div style={{ flex: '1 1 180px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 16px' }}>
+          <p style={{ margin: '0 0 2px', fontSize: 11.5, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: 0.4 }}>Stock value (cost)</p>
+          <p style={{ margin: 0, fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>{formatNaira(stockValue.atCost)}</p>
+          {stockValue.missingCostCount > 0 && (
+            <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-faint)' }}>
+              {stockValue.missingCostCount} product{stockValue.missingCostCount === 1 ? '' : 's'} with stock but no cost price set — excluded
+            </p>
+          )}
+        </div>
+        <div style={{ flex: '1 1 180px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 16px' }}>
+          <p style={{ margin: '0 0 2px', fontSize: 11.5, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: 0.4 }}>Stock value (selling price)</p>
+          <p style={{ margin: 0, fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>{formatNaira(stockValue.atSelling)}</p>
+        </div>
+        <div style={{ flex: '1 1 180px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 16px' }}>
+          <p style={{ margin: '0 0 2px', fontSize: 11.5, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: 0.4 }}>Potential profit</p>
+          <p style={{ margin: 0, fontSize: 18, fontWeight: 700, color: 'var(--success)' }}>{formatNaira(stockValue.potentialProfit)}</p>
+          <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-faint)' }}>If everything on hand sold at full price</p>
         </div>
       </div>
 

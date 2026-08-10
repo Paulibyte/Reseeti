@@ -343,23 +343,38 @@ export default function InvoiceForm({ business, onClose, onSaved, resumeDraft, o
     // still pending) to Supabase. If this fails or we're offline, the
     // draft just stays queued — the dashboard's sync-on-reconnect logic
     // will pick it up later, so nothing is lost either way.
+    //
+    // Wrapped in try/catch: navigator.onLine can report true even when
+    // there's no real connectivity (it only checks for an active network
+    // interface, not actual internet), so this whole block can still hit
+    // network errors despite the check above. The invoice draft is
+    // already safely queued locally at this point — a sync hiccup here
+    // must never look like the sale itself failed.
     let depleted = [];
     if (navigator.onLine) {
-      await syncQueue(supabase, business.id);
+      try {
+        await syncQueue(supabase, business.id);
 
-      // Stock deduction happens in a database trigger the instant the
-      // invoice_items row lands — by now it's already applied. Re-check
-      // just the products actually sold in this invoice to see whether
-      // any of them landed at zero, so the dashboard can flag it right
-      // when it happens rather than the owner discovering it days later
-      // on the Inventory page.
-      const soldProductIds = [...new Set(draft.items.map((it) => it.product_id).filter(Boolean))];
-      if (soldProductIds.length) {
-        const { data: refreshed } = await supabase
-          .from('products')
-          .select('name, stock_qty')
-          .in('id', soldProductIds);
-        depleted = (refreshed || []).filter((p) => Number(p.stock_qty) <= 0).map((p) => p.name);
+        // Stock deduction happens in a database trigger the instant the
+        // invoice_items row lands — by now it's already applied. Re-check
+        // just the products actually sold in this invoice to see whether
+        // any of them landed at zero, so the dashboard can flag it right
+        // when it happens rather than the owner discovering it days later
+        // on the Inventory page.
+        const soldProductIds = [...new Set(draft.items.map((it) => it.product_id).filter(Boolean))];
+        if (soldProductIds.length) {
+          const { data: refreshed } = await supabase
+            .from('products')
+            .select('name, stock_qty')
+            .in('id', soldProductIds);
+          depleted = (refreshed || []).filter((p) => Number(p.stock_qty) <= 0).map((p) => p.name);
+        }
+      } catch {
+        // Sync (or the depleted-stock check) failed — the draft stays in
+        // the local queue exactly as queueDraftInvoice left it, and will
+        // be retried the next time syncQueue runs (page load, 'online'
+        // event, or the next sale). Nothing to do here but let save()
+        // finish normally instead of crashing the form.
       }
     }
 
