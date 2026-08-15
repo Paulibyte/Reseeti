@@ -17,10 +17,46 @@ function toE164(input) {
   return '+234' + digits;
 }
 
+// ---------------------------------------------------------------------
+// Login model, in brief (see the Reseeti SMS-cost conversation this was
+// built from): password is now the primary credential, checked locally
+// with zero SMS cost. An OTP is only ever sent for three things —
+// someone who hasn't set a password yet, an unrecognized device, or a
+// password reset — mirroring how Moniepoint's app works, instead of
+// sending an SMS on every single login the way this page used to.
+//
+// Existing accounts all still have full access with zero disruption:
+// nobody has a password until they opt in, and the "Use SMS code
+// instead" link below always falls straight back to exactly the old
+// flow. See the set-password nudge in afterPrimaryFactor() for how
+// someone opts in for the first time.
+//
+// Known limitation, stated plainly rather than buried: the "verify this
+// new device" OTP step below is a client-side gate, not a database-
+// enforced one. supabase.auth.signInWithPassword() issues a real,
+// valid session the moment the password checks out — before this page
+// ever asks for a device-verification code. Someone using the normal UI
+// can't get past that screen without the code, but a password alone is
+// still enough to obtain a working session token if used directly
+// against the API rather than through this page. That's a real gap
+// against the old all-SMS model's guarantee, traded deliberately for
+// cutting SMS cost ~80-95% — closing it fully would mean enrolling
+// every user in Supabase's phone-MFA system and requiring aal2 at the
+// database/RLS layer, which is real additional work, not done here.
+// ---------------------------------------------------------------------
+
 export default function LoginPage() {
   const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
+  const [loginMode, setLoginMode] = useState('password'); // 'password' | 'otp' — which form shows on the 'phone' stage
   const [otpDigits, setOtpDigits] = useState(['', '', '', '', '', '']);
-  const [stage, setStage] = useState('phone'); // 'phone' | 'otp' | 'mfa'
+  const [stage, setStage] = useState('phone'); // 'phone' | 'otp' | 'mfa' | 'set-password'
+  // Controls what happens after the 'otp' stage's code is verified —
+  // set right before an OTP is actually sent, not before.
+  const [flowContext, setFlowContext] = useState('primary-otp'); // 'primary-otp' | 'device-verify' | 'password-reset'
+  const [passwordPromptReason, setPasswordPromptReason] = useState('nudge'); // 'nudge' | 'reset' — 'reset' hides the skip option
+  const [newPassword, setNewPassword] = useState('');
+  const [newPasswordConfirm, setNewPasswordConfirm] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
@@ -34,13 +70,58 @@ export default function LoginPage() {
   const fullPhone = toE164(phone);
   const otp = otpDigits.join('');
 
-  async function sendOtp(e) {
-    e?.preventDefault();
+  async function signInWithPassword(e) {
+    e.preventDefault();
     setError('');
     setLoading(true);
-    const { error } = await supabase.auth.signInWithOtp({ phone: fullPhone });
+
+    const { error: err } = await supabase.auth.signInWithPassword({ phone: fullPhone, password });
+    if (err) {
+      setLoading(false);
+      // Supabase returns the same generic message whether the password
+      // was wrong or never set at all — can't distinguish, so the hint
+      // covers both without confirming which one it was (that itself is
+      // account-existence-safe, same reasoning as ordinary login forms).
+      setError("That didn't work. If you haven't set a password yet, use \"Sign in with SMS code instead\" below.");
+      return;
+    }
+
+    // Password checked out — a real session already exists at this
+    // point (see the file-level note above). Now decide whether this
+    // device needs the extra step.
+    const res = await csrfFetch('/api/security/device-check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceId: getDeviceId() }),
+    });
     setLoading(false);
-    if (error) { setError(error.message); return; }
+
+    if (!res.ok) {
+      // Couldn't determine device status — fail toward the safer option
+      // (ask for the code) rather than silently skipping it.
+      await sendOtp(null, 'device-verify');
+      return;
+    }
+    const { isNewDevice } = await res.json();
+    if (isNewDevice) {
+      await sendOtp(null, 'device-verify');
+    } else {
+      await afterPrimaryFactor();
+    }
+  }
+
+  // context defaults to whatever flowContext already is; passed
+  // explicitly by callers (like signInWithPassword above) that are
+  // setting it fresh right before sending.
+  async function sendOtp(e, context) {
+    e?.preventDefault();
+    const ctx = context || flowContext;
+    setFlowContext(ctx);
+    setError('');
+    setLoading(true);
+    const { error: err } = await supabase.auth.signInWithOtp({ phone: fullPhone });
+    setLoading(false);
+    if (err) { setError(err.message); return; }
     setStage('otp');
   }
 
@@ -48,21 +129,27 @@ export default function LoginPage() {
     e.preventDefault();
     setError('');
     setLoading(true);
-    const { error } = await supabase.auth.verifyOtp({
+    const { error: err } = await supabase.auth.verifyOtp({
       phone: fullPhone,
       token: otp,
       type: 'sms',
     });
     setLoading(false);
-    if (error) { setError(error.message); return; }
+    if (err) { setError(err.message); return; }
+
+    if (flowContext === 'password-reset') {
+      setPasswordPromptReason('reset');
+      setStage('set-password');
+      return;
+    }
     await afterPrimaryFactor();
   }
 
-  // Phone OTP is the primary factor (AAL1). If this account also has a
-  // TOTP factor enrolled (Stage 25's Security page), Supabase requires a
+  // Phone OTP or password is the primary factor (AAL1). If this account
+  // also has a TOTP factor enrolled (Security page), Supabase requires a
   // second, separate verification before the session actually reaches
   // AAL2 — getAuthenticatorAssuranceLevel() is how the client finds out
-  // a second step is needed at all, since the phone-OTP call above
+  // a second step is needed at all, since the primary-factor call above
   // succeeds either way (it only establishes the first factor).
   async function afterPrimaryFactor() {
     const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
@@ -78,26 +165,80 @@ export default function LoginPage() {
         return;
       }
     }
-    await finishLogin();
+    await maybePromptForPassword();
   }
 
   async function verifyMfa(e) {
     e.preventDefault();
     setError('');
     setLoading(true);
-    const { error } = await supabase.auth.mfa.verify({
+    const { error: err } = await supabase.auth.mfa.verify({
       factorId: mfaFactorId,
       challengeId: mfaChallengeId,
       code: mfaCode,
     });
     setLoading(false);
-    if (error) { setError(error.message); return; }
+    if (err) { setError(err.message); return; }
+    await maybePromptForPassword();
+  }
+
+  // Only ever offered after a genuine OTP-primary login (someone who
+  // doesn't have a password set yet) — password-mode and device-verify
+  // logins skip straight to finishLogin(), since reaching either of
+  // those already implies a password exists. Shown once: dismissing it
+  // sets password_prompt_dismissed so it never nags again, independent
+  // of ever actually setting one.
+  async function maybePromptForPassword() {
+    if (flowContext !== 'primary-otp') {
+      await finishLogin();
+      return;
+    }
+    const { data: { user } } = await supabase.auth.getUser();
+    const meta = user?.user_metadata || {};
+    if (meta.password_login_enabled || meta.password_prompt_dismissed) {
+      await finishLogin();
+      return;
+    }
+    setPasswordPromptReason('nudge');
+    setStage('set-password');
+  }
+
+  async function savePassword(e) {
+    e.preventDefault();
+    setError('');
+    if (newPassword.length < 6) { setError('Password must be at least 6 characters.'); return; }
+    if (newPassword !== newPasswordConfirm) { setError("Passwords don't match."); return; }
+    setLoading(true);
+    const { error: err } = await supabase.auth.updateUser({
+      password: newPassword,
+      data: { password_login_enabled: true },
+    });
+    setLoading(false);
+    if (err) { setError(err.message); return; }
     await finishLogin();
   }
 
-  // Records this device (Stage 25's Security page device list) and
-  // triggers a login-alert SMS if it's genuinely new — best-effort, not
-  // allowed to block or fail the actual sign-in if it errors.
+  async function skipPasswordPrompt() {
+    setLoading(true);
+    await supabase.auth.updateUser({ data: { password_prompt_dismissed: true } });
+    setLoading(false);
+    await finishLogin();
+  }
+
+  async function startPasswordReset() {
+    if (!fullPhone || phone.length < 6) {
+      setError('Enter your phone number first.');
+      return;
+    }
+    await sendOtp(null, 'password-reset');
+  }
+
+  // Records this device (Security page device list) and triggers a
+  // login-alert SMS if it's genuinely new — best-effort, not allowed to
+  // block or fail the actual sign-in if it errors. Still called after a
+  // device-verify step-up (not just a fresh/never-seen device) since
+  // that's how the device actually gets recorded as recognized for next
+  // time — device-check itself only reads, it never writes.
   async function finishLogin() {
     try {
       await csrfFetch('/api/security/login-event', {
@@ -125,6 +266,17 @@ export default function LoginPage() {
     }
   }
 
+  const otpHeading = flowContext === 'device-verify'
+    ? "We don't recognize this device"
+    : flowContext === 'password-reset'
+      ? 'Reset your password'
+      : 'Verify Your Phone';
+  const otpSubtext = flowContext === 'device-verify'
+    ? 'For your security, enter the code sent to confirm it\'s really you.'
+    : flowContext === 'password-reset'
+      ? "Enter the code sent to confirm it's you, then you can set a new password."
+      : 'Enter the code sent to';
+
   return (
     <main
       style={{
@@ -148,23 +300,64 @@ export default function LoginPage() {
               Sign in to continue managing your invoices.
             </p>
 
-            <form onSubmit={sendOtp} style={{ textAlign: 'left' }}>
-              <div style={phoneInputWrap}>
-                <span style={phonePrefix}>+234</span>
+            {loginMode === 'password' ? (
+              <form onSubmit={signInWithPassword} style={{ textAlign: 'left' }}>
+                <div style={phoneInputWrap}>
+                  <span style={phonePrefix}>+234</span>
+                  <input
+                    type="tel"
+                    placeholder="8012345678"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    required
+                    autoFocus
+                    style={phoneInput}
+                  />
+                </div>
                 <input
-                  type="tel"
-                  placeholder="8012345678"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
+                  type="password"
+                  placeholder="Password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                   required
-                  autoFocus
-                  style={phoneInput}
+                  style={{ ...phoneInput, border: '1px solid var(--border)', borderRadius: 10, padding: '13px 12px', marginBottom: 16, background: 'var(--surface)' }}
                 />
-              </div>
-              <button disabled={loading} style={btnStyle}>
-                {loading ? 'Sending…' : 'Continue'}
-              </button>
-            </form>
+                <button disabled={loading} style={btnStyle}>
+                  {loading ? 'Signing in…' : 'Sign In'}
+                </button>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 14 }}>
+                  <button type="button" onClick={() => { setError(''); setLoginMode('otp'); }} style={resendLink}>
+                    Sign in with SMS code instead
+                  </button>
+                  <button type="button" onClick={startPasswordReset} style={{ ...resendLink, color: 'var(--text-faint)' }}>
+                    Forgot password?
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <form onSubmit={(e) => sendOtp(e, 'primary-otp')} style={{ textAlign: 'left' }}>
+                <div style={phoneInputWrap}>
+                  <span style={phonePrefix}>+234</span>
+                  <input
+                    type="tel"
+                    placeholder="8012345678"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    required
+                    autoFocus
+                    style={phoneInput}
+                  />
+                </div>
+                <button disabled={loading} style={btnStyle}>
+                  {loading ? 'Sending…' : 'Send SMS Code'}
+                </button>
+                <p style={{ textAlign: 'center', marginTop: 14 }}>
+                  <button type="button" onClick={() => { setError(''); setLoginMode('password'); }} style={resendLink}>
+                    Sign in with password instead
+                  </button>
+                </p>
+              </form>
+            )}
 
             {error && <p style={errorStyle}>{error}</p>}
 
@@ -180,10 +373,10 @@ export default function LoginPage() {
         ) : stage === 'otp' ? (
           <>
             <h1 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', fontSize: 24, margin: '0 0 8px' }}>
-              Verify Your Phone
+              {otpHeading}
             </h1>
             <p style={{ color: 'var(--text-muted)', fontSize: 14.5, margin: '0 0 4px' }}>
-              Enter the code sent to
+              {otpSubtext}
             </p>
             <p style={{ color: 'var(--text)', fontSize: 15, fontWeight: 700, margin: '0 0 24px' }}>
               {fullPhone}
@@ -217,7 +410,7 @@ export default function LoginPage() {
               Didn&apos;t receive a code?{' '}
               <button
                 type="button"
-                onClick={async () => { setResending(true); await sendOtp(); setResending(false); }}
+                onClick={async () => { setResending(true); await sendOtp(null, flowContext); setResending(false); }}
                 disabled={resending}
                 style={resendLink}
               >
@@ -225,7 +418,7 @@ export default function LoginPage() {
               </button>
             </p>
           </>
-        ) : (
+        ) : stage === 'mfa' ? (
           <>
             <h1 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', fontSize: 24, margin: '0 0 8px' }}>
               Enter Your 2FA Code
@@ -246,6 +439,47 @@ export default function LoginPage() {
               <button disabled={loading || mfaCode.length !== 6} style={btnStyle}>
                 {loading ? 'Verifying…' : 'Verify'}
               </button>
+            </form>
+
+            {error && <p style={errorStyle}>{error}</p>}
+          </>
+        ) : (
+          <>
+            <h1 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', fontSize: 24, margin: '0 0 8px' }}>
+              {passwordPromptReason === 'reset' ? 'Set a new password' : 'Skip SMS codes next time'}
+            </h1>
+            <p style={{ color: 'var(--text-muted)', fontSize: 14.5, lineHeight: 1.5, margin: '0 0 24px' }}>
+              {passwordPromptReason === 'reset'
+                ? 'Choose a new password for your account.'
+                : "Set a password so you don't need an SMS code every time you sign in on this device."}
+            </p>
+
+            <form onSubmit={savePassword} style={{ textAlign: 'left' }}>
+              <input
+                type="password"
+                placeholder="New password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                required
+                autoFocus
+                style={{ ...phoneInput, border: '1px solid var(--border)', borderRadius: 10, padding: '13px 12px', marginBottom: 12, background: 'var(--surface)' }}
+              />
+              <input
+                type="password"
+                placeholder="Confirm password"
+                value={newPasswordConfirm}
+                onChange={(e) => setNewPasswordConfirm(e.target.value)}
+                required
+                style={{ ...phoneInput, border: '1px solid var(--border)', borderRadius: 10, padding: '13px 12px', marginBottom: 16, background: 'var(--surface)' }}
+              />
+              <button disabled={loading} style={btnStyle}>
+                {loading ? 'Saving…' : passwordPromptReason === 'reset' ? 'Save & continue' : 'Set password'}
+              </button>
+              {passwordPromptReason === 'nudge' && (
+                <button type="button" onClick={skipPasswordPrompt} disabled={loading} style={{ ...resendLink, display: 'block', margin: '14px auto 0' }}>
+                  Skip for now
+                </button>
+              )}
             </form>
 
             {error && <p style={errorStyle}>{error}</p>}
