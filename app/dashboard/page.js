@@ -510,7 +510,7 @@ export default function Dashboard() {
                 onClick={() => setShowUpgrade(true)}
                 style={{ background: 'var(--orange)', color: '#fff', border: 'none', padding: '9px 16px', borderRadius: 6, fontWeight: 700, cursor: 'pointer' }}
               >
-                Upgrade to Pro — ₦1,500/mo
+                Upgrade to Pro — from ₦4,167/mo
               </button>
             </div>
           )}

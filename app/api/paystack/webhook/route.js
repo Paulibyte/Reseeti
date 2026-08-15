@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '../../../../lib/supabaseAdmin';
 import { timingSafeEqualHex } from '../../../../lib/crypto';
+import { renewsAtForMonths, getTier } from '../../../../lib/planTiers';
 
 // Paystack signs every webhook body with your secret key so you can trust
 // it actually came from them and not someone hitting your endpoint directly
@@ -32,65 +33,43 @@ export async function POST(request) {
     raw_payload: event,
   });
 
-  switch (event.event) {
-    case 'charge.success': {
-      const businessId = event.data.metadata?.business_id;
-      const customerCode = event.data.customer?.customer_code;
-      const subscriptionCode = event.data.plan_object?.plan_code
-        ? event.data.subscription_code
-        : null;
+  // Only 'charge.success' matters now — Reseeti's 3 tiers (see
+  // lib/planTiers.js) are each a one-off charge, not a Paystack
+  // recurring Plan/subscription, so the invoice.payment_failed and
+  // subscription.disable events that used to matter for the old
+  // ₦1,500/month auto-renewing Plan no longer apply: there's no
+  // subscription for Paystack to retry or disable. A business simply
+  // gets prompted to pay again once plan_renews_at passes (see the
+  // check-expiry cron), same model OPay and Monnify already use.
+  if (event.event === 'charge.success') {
+    const businessId = event.data.metadata?.business_id;
+    const tier = event.data.metadata?.tier;
+    const customerCode = event.data.customer?.customer_code;
 
-      // A month of grace by default; Paystack's own renewal webhook events
-      // will push this forward again on each successful recurring charge.
-      const renewsAt = new Date();
-      renewsAt.setDate(renewsAt.getDate() + 30);
-
-      if (businessId) {
+    if (businessId && tier) {
+      const tierRow = await getTier(tier);
+      if (tierRow) {
         await supabase
           .from('businesses')
           .update({
             plan: 'pro',
-            plan_renews_at: renewsAt.toISOString(),
+            plan_interval: tier,
+            plan_renews_at: renewsAtForMonths(tierRow.months).toISOString(),
             // A successful charge means this business is current again —
             // clears any grace period started by the check-expiry cron
             // if the previous charge attempt had failed.
             plan_grace_until: null,
             paystack_customer_code: customerCode,
-            paystack_subscription_code: subscriptionCode,
           })
           .eq('id', businessId);
 
         await supabase.from('events').insert({
           business_id: businessId,
           event_type: 'upgrade_completed',
-          metadata: { reference: event.data.reference },
+          metadata: { reference: event.data.reference, tier },
         });
       }
-      break;
     }
-
-    // Fired when a recurring charge fails (expired card, insufficient funds).
-    // Don't downgrade instantly on the first failure — Paystack retries
-    // automatically over a few days. Only act on the explicit "we've given
-    // up" event below.
-    case 'invoice.payment_failed': {
-      break;
-    }
-
-    // Fired when a subscription is fully cancelled/disabled.
-    case 'subscription.disable': {
-      const subscriptionCode = event.data.subscription_code;
-      if (subscriptionCode) {
-        await supabase
-          .from('businesses')
-          .update({ plan: 'free' })
-          .eq('paystack_subscription_code', subscriptionCode);
-      }
-      break;
-    }
-
-    default:
-      break;
   }
 
   return NextResponse.json({ received: true });

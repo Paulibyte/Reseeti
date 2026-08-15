@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createRouteClient, getMyBusinessId } from '../../../../lib/supabaseServer';
 import { initializeTransaction } from '../../../../lib/monnify';
+import { getTier } from '../../../../lib/planTiers';
 
 export async function POST(request) {
   const supabase = createRouteClient();
@@ -9,9 +10,13 @@ export async function POST(request) {
     return NextResponse.json({ error: 'Not signed in' }, { status: 401 });
   }
 
-  const { email } = await request.json();
+  const { email, tier } = await request.json();
   if (!email) {
     return NextResponse.json({ error: 'Email is required by Monnify for billing' }, { status: 400 });
+  }
+  const tierRow = await getTier(tier);
+  if (!tierRow) {
+    return NextResponse.json({ error: 'Invalid plan tier' }, { status: 400 });
   }
 
   const membership = await getMyBusinessId(supabase);
@@ -34,13 +39,13 @@ export async function POST(request) {
 
   try {
     const result = await initializeTransaction({
-      amount: 1500.0, // ₦1,500 — Monnify takes naira, not kobo (unlike Paystack/OPay)
+      amount: tierRow.amount_naira, // Monnify takes naira, not kobo (unlike Paystack/OPay)
       customerName: business.name,
       customerEmail: email,
       paymentReference,
-      paymentDescription: 'Reseeti Pro subscription',
+      paymentDescription: `Reseeti Pro subscription — ${tierRow.label}`,
       redirectUrl: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?payment=success`,
-      metaData: { business_id: business.id },
+      metaData: { business_id: business.id, tier },
     });
 
     return NextResponse.json({ checkout_url: result.checkoutUrl });

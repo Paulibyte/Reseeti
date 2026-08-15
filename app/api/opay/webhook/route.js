@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '../../../../lib/supabaseAdmin';
 import { verifyCallbackSignature } from '../../../../lib/opay';
+import { renewsAtForMonths, getTier } from '../../../../lib/planTiers';
 
 export async function POST(request) {
   const body = await request.json();
@@ -10,10 +11,14 @@ export async function POST(request) {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
   }
 
-  // business_id was embedded in the reference at initialize time — see
-  // app/api/opay/initialize/route.js.
-  const match = /^opay_sub__(.+)__\d+$/.exec(payload.reference || '');
-  const businessId = match?.[1] || null;
+  // tier and business_id were both embedded in the reference at
+  // initialize time — see app/api/opay/initialize/route.js. Tier ids
+  // are restricted to lowercase letters/digits/hyphens when created in
+  // /admin (see plan-tiers/route.js), which is what makes matching them
+  // explicitly here (rather than greedily like business_id) unambiguous.
+  const match = /^opay_sub__([a-z0-9-]+)__(.+)__\d+$/.exec(payload.reference || '');
+  const tier = match?.[1] || null;
+  const businessId = match?.[2] || null;
 
   const supabase = createAdminClient();
 
@@ -25,26 +30,24 @@ export async function POST(request) {
     raw_payload: body,
   });
 
-  if (payload.status === 'SUCCESS' && businessId) {
-    // A month of grace, same convention as the Paystack webhook — there's
-    // no recurring-subscription concept on OPay's Cashier product, so
-    // renewal here just means "prompt to pay again in 30 days."
-    const renewsAt = new Date();
-    renewsAt.setDate(renewsAt.getDate() + 30);
+  if (payload.status === 'SUCCESS' && businessId && tier) {
+    const tierRow = await getTier(tier);
+    if (tierRow) {
+      await supabase.from('businesses').update({
+        plan: 'pro',
+        plan_interval: tier,
+        plan_renews_at: renewsAtForMonths(tierRow.months).toISOString(),
+        // See the same field in the Paystack webhook — clears any grace
+        // period a previously-failed payment attempt had started.
+        plan_grace_until: null,
+      }).eq('id', businessId);
 
-    await supabase.from('businesses').update({
-      plan: 'pro',
-      plan_renews_at: renewsAt.toISOString(),
-      // See the same field in the Paystack webhook — clears any grace
-      // period a previously-failed payment attempt had started.
-      plan_grace_until: null,
-    }).eq('id', businessId);
-
-    await supabase.from('events').insert({
-      business_id: businessId,
-      event_type: 'upgrade_completed',
-      metadata: { reference: payload.reference, gateway: 'opay' },
-    });
+      await supabase.from('events').insert({
+        business_id: businessId,
+        event_type: 'upgrade_completed',
+        metadata: { reference: payload.reference, gateway: 'opay', tier },
+      });
+    }
   }
 
   // OPay only checks the HTTP status code on callbacks, not the response

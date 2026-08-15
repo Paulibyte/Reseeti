@@ -27,6 +27,13 @@ export default function AdminPage() {
   const [drafts, setDrafts] = useState({}); // business_id -> { monthly_invoice_limit }
   const [error, setError] = useState('');
 
+  const [tiers, setTiers] = useState([]);
+  const [tierDrafts, setTierDrafts] = useState({}); // tier_id -> partial edits not yet saved
+  const [savingTierId, setSavingTierId] = useState(null);
+  const [showNewTier, setShowNewTier] = useState(false);
+  const [newTier, setNewTier] = useState({ id: '', label: '', amount_naira: '', months: '' });
+  const [tierError, setTierError] = useState('');
+
   useEffect(() => { load(); }, []);
 
   async function load() {
@@ -42,6 +49,16 @@ export default function AdminPage() {
     setPlatformLimit(String(data.platformSettings?.free_plan_invoice_limit ?? 5));
     setBusinesses(data.businesses || []);
     setStatus('ready');
+
+    await loadTiers();
+  }
+
+  async function loadTiers() {
+    const res = await fetch('/api/admin/plan-tiers');
+    if (res.ok) {
+      const data = await res.json();
+      setTiers(data.tiers || []);
+    }
   }
 
   async function saveLimit() {
@@ -57,6 +74,63 @@ export default function AdminPage() {
       const body = await res.json().catch(() => ({}));
       setError(body.error || 'Could not save the platform limit.');
     }
+  }
+
+  async function toggleTierActive(t) {
+    setSavingTierId(t.id);
+    const res = await csrfFetch(`/api/admin/plan-tiers/${t.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active: !t.active }),
+    });
+    setSavingTierId(null);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      alert(body.error || 'Could not update the plan.');
+      return;
+    }
+    setTiers((prev) => prev.map((x) => (x.id === t.id ? { ...x, active: !t.active } : x)));
+  }
+
+  async function saveTierEdits(t) {
+    const draft = tierDrafts[t.id];
+    if (!draft) return;
+    setSavingTierId(t.id);
+    const res = await csrfFetch(`/api/admin/plan-tiers/${t.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(draft),
+    });
+    setSavingTierId(null);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      alert(body.error || 'Could not save changes to this plan.');
+      return;
+    }
+    setTiers((prev) => prev.map((x) => (x.id === t.id ? { ...x, ...draft } : x)));
+    setTierDrafts((prev) => { const next = { ...prev }; delete next[t.id]; return next; });
+  }
+
+  function updateTierDraft(tierId, field, value) {
+    setTierDrafts((prev) => ({ ...prev, [tierId]: { ...prev[tierId], [field]: value } }));
+  }
+
+  async function createTier(e) {
+    e.preventDefault();
+    setTierError('');
+    const res = await csrfFetch('/api/admin/plan-tiers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newTier),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setTierError(body.error || 'Could not create the plan.');
+      return;
+    }
+    setNewTier({ id: '', label: '', amount_naira: '', months: '' });
+    setShowNewTier(false);
+    await loadTiers();
   }
 
   async function togglePlan(biz) {
@@ -176,6 +250,104 @@ export default function AdminPage() {
         </div>
       </section>
 
+      <section style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: 20, marginBottom: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+          <h2 style={{ fontSize: 16, margin: 0 }}>Subscription plans</h2>
+          <button
+            onClick={() => setShowNewTier((v) => !v)}
+            style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 12px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}
+          >
+            {showNewTier ? 'Cancel' : '+ Add plan'}
+          </button>
+        </div>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: -2, marginBottom: 14 }}>
+          What shows in the Upgrade screen — edit prices any time without a deploy. Deactivating a plan hides it from new
+          checkouts but keeps it intact for businesses already on it.
+        </p>
+
+        {showNewTier && (
+          <form onSubmit={createTier} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-end', marginBottom: 16, padding: 12, background: 'var(--bg)', borderRadius: 8 }}>
+            <div>
+              <label style={tinyLabel}>Plan id (slug)</label>
+              <input required placeholder="e.g. quarterly" value={newTier.id} onChange={(e) => setNewTier((p) => ({ ...p, id: e.target.value }))} style={tinyInput} />
+            </div>
+            <div>
+              <label style={tinyLabel}>Label</label>
+              <input required placeholder="e.g. 3 Months" value={newTier.label} onChange={(e) => setNewTier((p) => ({ ...p, label: e.target.value }))} style={tinyInput} />
+            </div>
+            <div>
+              <label style={tinyLabel}>Amount (₦)</label>
+              <input required type="number" min="1" value={newTier.amount_naira} onChange={(e) => setNewTier((p) => ({ ...p, amount_naira: e.target.value }))} style={{ ...tinyInput, width: 100 }} />
+            </div>
+            <div>
+              <label style={tinyLabel}>Months</label>
+              <input required type="number" min="1" value={newTier.months} onChange={(e) => setNewTier((p) => ({ ...p, months: e.target.value }))} style={{ ...tinyInput, width: 70 }} />
+            </div>
+            <button type="submit" style={{ background: 'var(--orange)', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>
+              Create
+            </button>
+            {tierError && <p style={{ width: '100%', color: 'var(--danger)', fontSize: 12.5, margin: 0 }}>{tierError}</p>}
+          </form>
+        )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {tiers.map((t) => {
+            const draft = tierDrafts[t.id] || {};
+            const hasEdits = Object.keys(draft).length > 0;
+            return (
+              <div key={t.id} style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8, opacity: t.active ? 1 : 0.55 }}>
+                <span style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--text-faint)', minWidth: 80 }}>{t.id}</span>
+                <input
+                  value={draft.label !== undefined ? draft.label : t.label}
+                  onChange={(e) => updateTierDraft(t.id, 'label', e.target.value)}
+                  style={{ ...tinyInput, width: 110 }}
+                />
+                <span style={{ fontSize: 12.5, color: 'var(--text-faint)' }}>₦</span>
+                <input
+                  type="number"
+                  min="1"
+                  value={draft.amount_naira !== undefined ? draft.amount_naira : t.amount_naira}
+                  onChange={(e) => updateTierDraft(t.id, 'amount_naira', e.target.value)}
+                  style={{ ...tinyInput, width: 90 }}
+                />
+                <span style={{ fontSize: 12.5, color: 'var(--text-faint)' }}>for</span>
+                <input
+                  type="number"
+                  min="1"
+                  value={draft.months !== undefined ? draft.months : t.months}
+                  onChange={(e) => updateTierDraft(t.id, 'months', e.target.value)}
+                  style={{ ...tinyInput, width: 55 }}
+                />
+                <span style={{ fontSize: 12.5, color: 'var(--text-faint)' }}>month(s)</span>
+
+                {hasEdits && (
+                  <button
+                    onClick={() => saveTierEdits(t)}
+                    disabled={savingTierId === t.id}
+                    style={{ background: 'var(--orange)', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+                  >
+                    Save
+                  </button>
+                )}
+                <button
+                  onClick={() => toggleTierActive(t)}
+                  disabled={savingTierId === t.id}
+                  style={{
+                    marginLeft: 'auto', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5,
+                    padding: '5px 10px', borderRadius: 20, border: 'none', cursor: 'pointer',
+                    background: t.active ? 'var(--success-bg)' : 'var(--surface-alt)',
+                    color: t.active ? 'var(--success)' : 'var(--text-faint)',
+                  }}
+                >
+                  {t.active ? 'Active' : 'Inactive'}
+                </button>
+              </div>
+            );
+          })}
+          {tiers.length === 0 && <p style={{ color: 'var(--text-faint)', fontSize: 13 }}>No plans yet — add one above.</p>}
+        </div>
+      </section>
+
       <section>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <h2 style={{ fontSize: 16, margin: 0 }}>Businesses ({businesses.length})</h2>
@@ -252,3 +424,6 @@ export default function AdminPage() {
     </main>
   );
 }
+
+const tinyLabel = { display: 'block', fontSize: 10.5, fontWeight: 700, color: 'var(--text-faint)', marginBottom: 3, textTransform: 'uppercase' };
+const tinyInput = { padding: '7px 9px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12.5, background: 'var(--surface)', color: 'var(--text)' };
