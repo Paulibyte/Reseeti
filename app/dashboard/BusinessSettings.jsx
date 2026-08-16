@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { createClient } from '../../lib/supabaseClient';
 import AppVersion from './AppVersion';
+import { csrfFetch } from '../../lib/csrfFetch';
 
 export default function BusinessSettings({ business, onSaved, onClose }) {
   const supabase = createClient();
@@ -34,6 +35,40 @@ export default function BusinessSettings({ business, onSaved, onClose }) {
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  // Catalogue module — whatsappNumber saves through the normal save()
+  // flow below like any other field, but catalogueEnabled deliberately
+  // does NOT: it's Pro-gated, which RLS has no way to enforce on a plain
+  // client update, so toggling it only ever happens through the two
+  // dedicated API routes (see toggleCatalogue below).
+  const [whatsappNumber, setWhatsappNumber] = useState(business.whatsapp_number || '');
+  const [catalogueEnabled, setCatalogueEnabled] = useState(business.catalogue_enabled || false);
+  const [catalogueSlug, setCatalogueSlug] = useState(business.catalogue_slug || null);
+  const [togglingCatalogue, setTogglingCatalogue] = useState(false);
+  const [catalogueError, setCatalogueError] = useState('');
+  const [linkCopied, setLinkCopied] = useState(false);
+
+  async function toggleCatalogue() {
+    setTogglingCatalogue(true);
+    setCatalogueError('');
+    const endpoint = catalogueEnabled ? '/api/catalogue/disable' : '/api/catalogue/enable';
+    const res = await csrfFetch(endpoint, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    setTogglingCatalogue(false);
+    if (!res.ok) {
+      setCatalogueError(data.error || 'Could not update the catalogue.');
+      return;
+    }
+    setCatalogueEnabled(!catalogueEnabled);
+    if (data.slug) setCatalogueSlug(data.slug);
+  }
+
+  function copyShopLink() {
+    const url = `${window.location.origin}/shop/${catalogueSlug}`;
+    navigator.clipboard.writeText(url);
+    setLinkCopied(true);
+    setTimeout(() => setLinkCopied(false), 2000);
+  }
 
   function handlePrefixChange(value) {
     setInvoicePrefix(value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6));
@@ -134,6 +169,7 @@ export default function BusinessSettings({ business, onSaved, onClose }) {
         sms_reminders_enabled: smsRemindersEnabled,
         whatsapp_reminders_enabled: whatsappRemindersEnabled,
         reminder_days_after: Math.max(Number(reminderDaysAfter) || 3, 1),
+        whatsapp_number: whatsappNumber || null,
       })
       .eq('id', business.id);
     setSaving(false);
@@ -145,11 +181,7 @@ export default function BusinessSettings({ business, onSaved, onClose }) {
     setSendingTestReminders(true);
     setReminderResult(null);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const res = await fetch('/api/reminders/send', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${session?.access_token}` },
-      });
+      const res = await csrfFetch('/api/reminders/send', { method: 'POST' });
       const data = await res.json();
       setReminderResult(res.ok ? data : { error: data.error || 'Failed to send reminders' });
     } catch (err) {
@@ -358,6 +390,61 @@ export default function BusinessSettings({ business, onSaved, onClose }) {
       <p style={{ fontSize: 11, color: 'var(--text-faint)', margin: '-4px 0 16px' }}>
         Save your settings below first if you just turned this on — the button uses whatever's currently saved.
       </p>
+
+      <h4 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', fontSize: 13.5, margin: '18px 0 8px', textTransform: 'uppercase', letterSpacing: 0.3 }}>
+        Online catalogue & WhatsApp ordering
+      </h4>
+      {business.plan !== 'pro' ? (
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
+          Share a public product catalogue and take orders straight to your WhatsApp — a Pro feature. Upgrade to turn it on.
+        </p>
+      ) : (
+        <>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: -2, marginBottom: 10 }}>
+            A shareable link showing everything you've marked "show in catalogue" on the Inventory page. Customers pick
+            what they want and send you the order straight to WhatsApp — no separate app for them to install.
+          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+            <button
+              type="button"
+              onClick={toggleCatalogue}
+              disabled={togglingCatalogue}
+              style={{
+                background: catalogueEnabled ? 'var(--success-bg)' : 'var(--orange)',
+                color: catalogueEnabled ? 'var(--success)' : '#fff',
+                border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 700, fontSize: 13, cursor: 'pointer',
+              }}
+            >
+              {togglingCatalogue ? 'Saving…' : catalogueEnabled ? 'Catalogue is ON — turn off' : 'Turn on catalogue'}
+            </button>
+            {catalogueEnabled && catalogueSlug && (
+              <button
+                type="button"
+                onClick={copyShopLink}
+                style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '8px 12px', fontSize: 12.5, cursor: 'pointer' }}
+              >
+                {linkCopied ? 'Copied!' : `Copy link: /shop/${catalogueSlug}`}
+              </button>
+            )}
+          </div>
+          {catalogueError && <p style={{ color: 'var(--danger)', fontSize: 12.5, marginBottom: 8 }}>{catalogueError}</p>}
+
+          <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4, marginTop: 8 }}>
+            WhatsApp Business number for orders
+          </label>
+          <input
+            type="tel"
+            placeholder="e.g. 08012345678"
+            value={whatsappNumber}
+            onChange={(e) => setWhatsappNumber(e.target.value)}
+            style={{ width: '100%', padding: '9px 11px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 14, marginBottom: 4, boxSizing: 'border-box', background: 'var(--bg)', color: 'var(--text)' }}
+          />
+          <p style={{ fontSize: 11.5, color: 'var(--text-faint)', margin: '0 0 16px' }}>
+            Where "Order via WhatsApp" sends the customer — can be a different line than the one you log in with. Orders
+            won't work until this is set and saved.
+          </p>
+        </>
+      )}
 
       <h4 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', fontSize: 13.5, margin: '18px 0 8px', textTransform: 'uppercase', letterSpacing: 0.3 }}>
         Terms &amp; conditions

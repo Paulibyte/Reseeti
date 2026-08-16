@@ -18,6 +18,7 @@ export default function ProductForm({ business, product, familyId, familyName, o
     low_stock_threshold: product?.low_stock_threshold ?? 5,
     unit: product?.unit || '',
     unit_value: product?.unit_value ?? '',
+    show_in_catalogue: product?.show_in_catalogue || false,
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -44,6 +45,7 @@ export default function ProductForm({ business, product, familyId, familyName, o
       low_stock_threshold: Number(form.low_stock_threshold) || 0,
       unit: form.unit || null,
       unit_value: form.unit_value === '' ? null : Number(form.unit_value),
+      show_in_catalogue: business.plan === 'pro' ? form.show_in_catalogue : false,
     };
 
     // Only set on creation, and only when this form was opened via
@@ -177,6 +179,13 @@ export default function ProductForm({ business, product, familyId, familyName, o
           <p style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: -6 }}>
             You'll see a low-stock warning once quantity on hand drops to or below this number.
           </p>
+
+          {business.plan === 'pro' && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, cursor: 'pointer', fontSize: 13.5, color: 'var(--text)' }}>
+              <input type="checkbox" checked={form.show_in_catalogue} onChange={(e) => set('show_in_catalogue', e.target.checked)} />
+              Show in online catalogue
+            </label>
+          )}
 
           {error && <p style={{ color: 'var(--danger)', fontSize: 13 }}>{error}</p>}
 

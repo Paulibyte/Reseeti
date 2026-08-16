@@ -17,6 +17,19 @@ function toE164(input) {
   return '+234' + digits;
 }
 
+// Supabase (and the network layer under it) doesn't always hand back an
+// error with a plain .message string — sometimes it's an empty object,
+// sometimes message is blank, sometimes it's a raw fetch/network
+// exception with a different shape entirely. Rendering the object
+// itself (previously `setError(err.message)` with no fallback) could
+// show a literal "{}" on screen with zero useful information, so every
+// error path below runs through this instead.
+function readableError(err) {
+  if (!err) return 'Something went wrong. Please try again.';
+  if (typeof err.message === 'string' && err.message.trim()) return err.message;
+  return 'Something went wrong — please try again, or check your connection.';
+}
+
 // ---------------------------------------------------------------------
 // Login model, in brief (see the Reseeti SMS-cost conversation this was
 // built from): password is now the primary credential, checked locally
@@ -121,7 +134,7 @@ export default function LoginPage() {
     setLoading(true);
     const { error: err } = await supabase.auth.signInWithOtp({ phone: fullPhone });
     setLoading(false);
-    if (err) { setError(err.message); return; }
+    if (err) { setError(readableError(err)); return; }
     setStage('otp');
   }
 
@@ -135,7 +148,7 @@ export default function LoginPage() {
       type: 'sms',
     });
     setLoading(false);
-    if (err) { setError(err.message); return; }
+    if (err) { setError(readableError(err)); return; }
 
     if (flowContext === 'password-reset') {
       setPasswordPromptReason('reset');
@@ -178,7 +191,7 @@ export default function LoginPage() {
       code: mfaCode,
     });
     setLoading(false);
-    if (err) { setError(err.message); return; }
+    if (err) { setError(readableError(err)); return; }
     await maybePromptForPassword();
   }
 
@@ -214,7 +227,7 @@ export default function LoginPage() {
       data: { password_login_enabled: true },
     });
     setLoading(false);
-    if (err) { setError(err.message); return; }
+    if (err) { setError(readableError(err)); return; }
     await finishLogin();
   }
 
