@@ -6,6 +6,7 @@ import { createClient } from '../../../lib/supabaseClient';
 import { getMyBusiness } from '../../../lib/getMyBusiness';
 import DashboardShell from '../DashboardShell';
 import { can, ROLE_LABELS, ASSIGNABLE_ROLES, PERMISSION_LABELS, PERMISSION_ORDER, permissionsFor } from '../../../lib/permissions';
+import { toE164NoPlus, formatPhoneDisplay } from '../../../lib/phone';
 
 // Number of permissions a member's overrides have actually pulled away
 // from their role's default — used for the "+2 custom" badge in the
@@ -16,15 +17,12 @@ function overrideCount(overrides) {
 }
 
 // Converts a Nigerian local number (08012345678) to E.164 format
-// (+2348012345678), matching the format the login page's OTP flow uses —
-// invites are keyed on phone, so this must match exactly or a staff
-// member's signup won't find their pending invite.
-function toE164(input) {
-  const digits = input.replace(/\D/g, '');
-  if (digits.startsWith('0')) return '+234' + digits.slice(1);
-  if (digits.startsWith('234')) return '+' + digits;
-  return '+234' + digits;
-}
+// Stage 43: this used to have its own local toE164() that added a
+// leading '+' — but Supabase's own auth.users.phone is stored WITHOUT
+// one, confirmed directly against a real account. That mismatch meant
+// invites silently never matched a new signup's phone at all. Now uses
+// the shared, correct formatter (lib/phone.js) so this can't drift out
+// of sync with auth.users' actual format again.
 
 function PermissionTable({ role }) {
   const perms = permissionsFor(role);
@@ -100,7 +98,7 @@ export default function TeamPage() {
 
     const { error: err } = await supabase.from('business_members').insert({
       business_id: business.id,
-      phone: toE164(invitePhone),
+      phone: toE164NoPlus(invitePhone),
       label: inviteLabel || null,
       role: inviteRole,
       status: 'invited',
@@ -250,10 +248,10 @@ export default function TeamPage() {
           >
             <div>
               <p style={{ margin: 0, fontWeight: 600, color: 'var(--text)', fontSize: 14.5 }}>
-                {m.label || m.phone}
+                {m.label || formatPhoneDisplay(m.phone)}
               </p>
               <p style={{ margin: 0, fontSize: 12, color: 'var(--text-faint)' }}>
-                {m.label ? `${m.phone} · ` : ''}
+                {m.label ? `${formatPhoneDisplay(m.phone)} · ` : ''}
                 {ROLE_LABELS[m.role] || m.role}
                 {m.status === 'invited' ? ' · Invited, not yet joined' : ''}
                 {overrideCount(m.permission_overrides) > 0 && (

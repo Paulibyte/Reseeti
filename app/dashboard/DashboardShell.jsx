@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Sidebar from './Sidebar';
 import MobileNavDrawer from './MobileNavDrawer';
 import NotificationsBell from './NotificationsBell';
@@ -9,11 +9,16 @@ import OfflineBadge from './OfflineBadge';
 import InstallPrompt from './InstallPrompt';
 import UpdateNotification from './UpdateNotification';
 import FeedbackButton from './FeedbackButton';
+import PendingInvitesBanner from './PendingInvitesBanner';
+import BusinessSwitcher from './BusinessSwitcher';
 import Logo from '../components/Logo';
+import { createClient } from '../../lib/supabaseClient';
+import { getMyBusiness } from '../../lib/getMyBusiness';
 
 export default function DashboardShell({
   plan = 'free',
   role,
+  overrides,
   onUpgradeClick,
   onSettingsClick,
   onCreateInvoice,
@@ -22,20 +27,37 @@ export default function DashboardShell({
   children,
 }) {
   const [navOpen, setNavOpen] = useState(false);
+  // Fetched independently here rather than threaded down as a prop from
+  // every one of the 30+ pages that render DashboardShell — this is the
+  // one place a switcher needs to exist, so it's simpler for it to load
+  // its own small slice of data than to change every page's signature.
+  const [businesses, setBusinesses] = useState([]);
+  const [currentBusinessId, setCurrentBusinessId] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      const supabase = createClient();
+      const { business, businesses: list } = await getMyBusiness(supabase);
+      setBusinesses(list || []);
+      setCurrentBusinessId(business?.id || null);
+    })();
+  }, []);
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
-      <Sidebar plan={plan} role={role} onUpgradeClick={onUpgradeClick} onSignOut={onSignOut} />
+      <Sidebar plan={plan} role={role} overrides={overrides} onUpgradeClick={onUpgradeClick} onSignOut={onSignOut} />
       <MobileNavDrawer
         open={navOpen}
         onClose={() => setNavOpen(false)}
         plan={plan}
         role={role}
+        overrides={overrides}
         onUpgradeClick={onUpgradeClick}
         onSignOut={onSignOut}
       />
 
       <div className="reseeti-content">
+        <PendingInvitesBanner />
         <header
           style={{
             display: 'flex',
@@ -73,6 +95,7 @@ export default function DashboardShell({
             <div className="reseeti-mobile-logo" style={{ display: 'flex' }}>
               <Logo size={26} showWordmark />
             </div>
+            <BusinessSwitcher businesses={businesses} currentId={currentBusinessId} />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' }}>
             <OfflineBadge />

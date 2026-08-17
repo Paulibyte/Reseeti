@@ -1,6 +1,17 @@
 import { createAdminClient } from '../../../lib/supabaseAdmin';
 import ShopCart from './ShopCart';
 
+// Next.js caches a server component's data fetches by default and
+// keeps serving that same snapshot on every subsequent visit unless
+// told otherwise — fine for something immutable like a receipt, but
+// this page's whole point is showing whichever products are currently
+// toggled "show in catalogue" and in stock, which changes constantly.
+// Without this, toggling a product on Inventory would have no visible
+// effect on the live page until something else happened to bust the
+// cache.
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 // Public, no login required — a customer reaches this from a shared
 // link (WhatsApp, social bio, etc), same as the existing /inv/[id]
 // public receipt page. Uses the service-role client for the same
