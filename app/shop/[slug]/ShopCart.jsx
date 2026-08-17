@@ -17,8 +17,13 @@ function toWhatsAppDigits(input) {
   return '234' + digits;
 }
 
-export default function ShopCart({ businessName, businessAddress, whatsappNumber, products }) {
+export default function ShopCart({ slug, businessName, businessAddress, whatsappNumber, products }) {
   const [cart, setCart] = useState({}); // product_id -> qty
+  const [showPhonePrompt, setShowPhonePrompt] = useState(false);
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [customerName, setCustomerName] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
 
   const grouped = useMemo(() => {
     const byCategory = {};
@@ -43,8 +48,7 @@ export default function ShopCart({ businessName, businessAddress, whatsappNumber
     setCart((prev) => ({ ...prev, [productId]: Math.max(0, qty) }));
   }
 
-  function sendWhatsAppOrder() {
-    if (cartItems.length === 0) return;
+  function buildWhatsAppUrl() {
     const lines = cartItems.map(
       (row, i) => `${i + 1}. ${row.product.name}${row.product.unit_value ? ` (${row.product.unit_value}${row.product.unit || ''})` : ''} x${row.qty} — ${formatNaira(row.product.price * row.qty)}`
     );
@@ -55,9 +59,47 @@ export default function ShopCart({ businessName, businessAddress, whatsappNumber
       '',
       `Total: ${formatNaira(total)}`,
     ].join('\n');
+    return `https://wa.me/${toWhatsAppDigits(whatsappNumber)}?text=${encodeURIComponent(message)}`;
+  }
 
-    const url = `https://wa.me/${toWhatsAppDigits(whatsappNumber)}?text=${encodeURIComponent(message)}`;
-    window.open(url, '_blank', 'noopener,noreferrer');
+  // First tap just opens the phone-number prompt below the cart summary
+  // — the actual submit happens in confirmAndSend().
+  function startCheckout() {
+    if (cartItems.length === 0) return;
+    setShowPhonePrompt(true);
+  }
+
+  async function confirmAndSend() {
+    if (!customerPhone || customerPhone.replace(/\D/g, '').length < 7) {
+      setSubmitError('Enter a valid phone number so the seller can reach you.');
+      return;
+    }
+    setSubmitting(true);
+    setSubmitError('');
+
+    // Best-effort — the order record is a convenience for the seller's
+    // dashboard (see schema_stage45.sql), not the actual communication
+    // channel. If this fails (network hiccup, etc), the customer should
+    // still be able to reach the seller via WhatsApp directly rather
+    // than being blocked by a secondary feature failing.
+    try {
+      await fetch('/api/catalogue/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          slug,
+          customerPhone,
+          customerName,
+          items: cartItems.map((row) => ({ productId: row.product.id, qty: row.qty })),
+        }),
+      });
+    } catch {
+      // Swallowed on purpose — see comment above.
+    }
+
+    setSubmitting(false);
+    window.open(buildWhatsAppUrl(), '_blank', 'noopener,noreferrer');
+    setShowPhonePrompt(false);
   }
 
   return (
@@ -135,17 +177,59 @@ export default function ShopCart({ businessName, businessAddress, whatsappNumber
 
       {itemCount > 0 && (
         <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: '#fff', borderTop: '1px solid #e6ddd0', padding: '12px 16px', boxShadow: '0 -4px 16px rgba(0,0,0,0.06)' }}>
-          <div style={{ maxWidth: 640, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-            <div>
-              <p style={{ margin: 0, fontSize: 12, color: '#8a8175' }}>{itemCount} item{itemCount === 1 ? '' : 's'}</p>
-              <p style={{ margin: 0, fontWeight: 800, fontSize: 16, color: '#1a2a4a' }}>{formatNaira(total)}</p>
-            </div>
-            <button
-              onClick={sendWhatsAppOrder}
-              style={{ background: '#25D366', color: '#fff', border: 'none', borderRadius: 10, padding: '13px 22px', fontWeight: 700, fontSize: 14.5, cursor: 'pointer' }}
-            >
-              Order via WhatsApp
-            </button>
+          <div style={{ maxWidth: 640, margin: '0 auto' }}>
+            {!showPhonePrompt ? (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <div>
+                  <p style={{ margin: 0, fontSize: 12, color: '#8a8175' }}>{itemCount} item{itemCount === 1 ? '' : 's'}</p>
+                  <p style={{ margin: 0, fontWeight: 800, fontSize: 16, color: '#1a2a4a' }}>{formatNaira(total)}</p>
+                </div>
+                <button
+                  onClick={startCheckout}
+                  style={{ background: '#25D366', color: '#fff', border: 'none', borderRadius: 10, padding: '13px 22px', fontWeight: 700, fontSize: 14.5, cursor: 'pointer' }}
+                >
+                  Order via WhatsApp
+                </button>
+              </div>
+            ) : (
+              <div>
+                <p style={{ margin: '0 0 8px', fontSize: 12.5, color: '#6b6255', fontWeight: 600 }}>
+                  So the seller can reach you — this doesn&apos;t replace WhatsApp, just helps them keep track.
+                </p>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                  <input
+                    type="tel"
+                    placeholder="Your phone number"
+                    value={customerPhone}
+                    onChange={(e) => setCustomerPhone(e.target.value)}
+                    style={{ flex: 1, padding: '10px 12px', border: '1px solid #e6ddd0', borderRadius: 8, fontSize: 14 }}
+                  />
+                  <input
+                    type="text"
+                    placeholder="Your name (optional)"
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                    style={{ flex: 1, padding: '10px 12px', border: '1px solid #e6ddd0', borderRadius: 8, fontSize: 14 }}
+                  />
+                </div>
+                {submitError && <p style={{ color: '#a63a3a', fontSize: 12.5, margin: '0 0 8px' }}>{submitError}</p>}
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={confirmAndSend}
+                    disabled={submitting}
+                    style={{ flex: 1, background: '#25D366', color: '#fff', border: 'none', borderRadius: 10, padding: '13px', fontWeight: 700, fontSize: 14.5, cursor: 'pointer' }}
+                  >
+                    {submitting ? 'Sending…' : `Send order — ${formatNaira(total)}`}
+                  </button>
+                  <button
+                    onClick={() => setShowPhonePrompt(false)}
+                    style={{ background: 'none', border: '1px solid #e6ddd0', color: '#3a332c', borderRadius: 10, padding: '13px 16px', cursor: 'pointer' }}
+                  >
+                    Back
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

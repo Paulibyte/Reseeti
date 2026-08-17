@@ -34,6 +34,7 @@ const UpgradeModal = dynamic(() => import('./UpgradeModal'), { ssr: false });
 const MarkPaidModal = dynamic(() => import('./MarkPaidModal'), { ssr: false });
 const SyncConflictModal = dynamic(() => import('./SyncConflictModal'), { ssr: false });
 const ParkedSalesPanel = dynamic(() => import('./ParkedSalesPanel'), { ssr: false });
+const PendingOrdersPanel = dynamic(() => import('./PendingOrdersPanel'), { ssr: false });
 
 function greetingForHour(hour) {
   if (hour < 12) return 'Good Morning';
@@ -53,6 +54,8 @@ export default function Dashboard() {
   const [resumeDraft, setResumeDraft] = useState(null);
   const [showParkedSales, setShowParkedSales] = useState(false);
   const [parkedCount, setParkedCount] = useState(0);
+  const [showPendingOrders, setShowPendingOrders] = useState(false);
+  const [pendingOrdersCount, setPendingOrdersCount] = useState(0);
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [markingPaidInvoice, setMarkingPaidInvoice] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -163,9 +166,21 @@ export default function Dashboard() {
     setParkedCount(parked.length);
   }
 
+  async function refreshPendingOrdersCount(businessId) {
+    const id = businessId || business?.id;
+    if (!id) return;
+    const { count } = await supabase
+      .from('catalogue_orders')
+      .select('id', { count: 'exact', head: true })
+      .eq('business_id', id)
+      .eq('status', 'pending');
+    setPendingOrdersCount(count || 0);
+  }
+
   function resumeSale(draft) {
     setResumeDraft(draft);
     setShowParkedSales(false);
+    setShowPendingOrders(false);
     setShowForm(true);
   }
 
@@ -177,6 +192,7 @@ export default function Dashboard() {
     setBusiness(biz);
     setRole(myRole);
     setOverrides(myOverrides || {});
+    refreshPendingOrdersCount(biz.id);
 
     // Paint from the last cached snapshot immediately (IndexedDB read is
     // async but fast — no network round trip), then let the network
@@ -528,6 +544,14 @@ export default function Dashboard() {
               ⏸ Parked ({parkedCount})
             </button>
           )}
+          {pendingOrdersCount > 0 && (
+            <button
+              onClick={() => setShowPendingOrders(true)}
+              style={{ background: 'var(--orange-bg)', color: 'var(--orange-dark)', border: '1px solid var(--orange)', padding: '9px 14px', borderRadius: 8, fontWeight: 700, cursor: 'pointer', fontSize: 13 }}
+            >
+              🛒 Orders ({pendingOrdersCount})
+            </button>
+          )}
           {!atLimit && can(role, 'createInvoice', overrides) && (
             <button
               onClick={() => { setResumeDraft(null); setShowForm(true); }}
@@ -562,6 +586,14 @@ export default function Dashboard() {
           onClose={() => setShowParkedSales(false)}
           onResume={resumeSale}
           onChanged={refreshParkedCount}
+        />
+      )}
+
+      {showPendingOrders && (
+        <PendingOrdersPanel
+          onClose={() => setShowPendingOrders(false)}
+          onConvert={resumeSale}
+          onChanged={() => refreshPendingOrdersCount()}
         />
       )}
 

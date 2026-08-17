@@ -58,6 +58,7 @@ export default async function ShopPage({ params }) {
 
   return (
     <ShopCart
+      slug={params.slug}
       businessName={business.name}
       businessAddress={business.address}
       whatsappNumber={business.whatsapp_number}
