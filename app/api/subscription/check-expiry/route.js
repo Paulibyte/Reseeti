@@ -73,6 +73,14 @@ export async function GET(request) {
     await admin.from('businesses').update({
       plan: 'free',
       plan_grace_until: null,
+      // Otherwise Settings would keep showing the catalogue as "on"
+      // (catalogue_enabled stays true) even though the public /shop
+      // page already independently checks plan === 'pro' and refuses
+      // to serve — cosmetic-but-confusing, not a security gap, but no
+      // reason to leave it inconsistent once a business is genuinely
+      // downgraded. Re-enabling later (once back on Pro) reuses the
+      // same slug — see app/api/catalogue/enable/route.js.
+      catalogue_enabled: false,
     }).eq('id', biz.id);
 
     await admin.from('events').insert({

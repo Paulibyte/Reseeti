@@ -112,6 +112,11 @@ export default function PendingOrdersPanel({ onClose, onConvert, onChanged }) {
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 4 }}>
                 <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>
                   {o.customer_name || 'Customer'} · {o.customer_phone}
+                  {o.payment_status === 'paid' && (
+                    <span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 700, color: 'var(--success)', background: 'var(--success-bg)', padding: '2px 7px', borderRadius: 10, textTransform: 'uppercase' }}>
+                      ✓ Paid online
+                    </span>
+                  )}
                 </p>
                 <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>{formatNaira(o.total)}</p>
               </div>
@@ -134,6 +139,11 @@ export default function PendingOrdersPanel({ onClose, onConvert, onChanged }) {
                   Dismiss
                 </button>
               </div>
+              {o.payment_status === 'paid' && (
+                <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--text-faint)' }}>
+                  Already paid via Paystack — mark the resulting invoice as paid once you convert it.
+                </p>
+              )}
             </div>
           ))}
         </div>

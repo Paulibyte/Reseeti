@@ -23,7 +23,7 @@ export default async function ShopPage({ params }) {
 
   const { data: business } = await supabase
     .from('businesses')
-    .select('id, name, address, whatsapp_number, plan, catalogue_enabled')
+    .select('id, name, address, whatsapp_number, plan, catalogue_enabled, paystack_subaccount_code')
     .eq('catalogue_slug', params.slug)
     .maybeSingle();
 
@@ -62,6 +62,7 @@ export default async function ShopPage({ params }) {
       businessName={business.name}
       businessAddress={business.address}
       whatsappNumber={business.whatsapp_number}
+      canPayOnline={!!business.paystack_subaccount_code}
       products={products || []}
     />
   );

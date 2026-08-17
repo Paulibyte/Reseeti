@@ -17,11 +17,12 @@ function toWhatsAppDigits(input) {
   return '234' + digits;
 }
 
-export default function ShopCart({ slug, businessName, businessAddress, whatsappNumber, products }) {
+export default function ShopCart({ slug, businessName, businessAddress, whatsappNumber, canPayOnline, products }) {
   const [cart, setCart] = useState({}); // product_id -> qty
   const [showPhonePrompt, setShowPhonePrompt] = useState(false);
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerName, setCustomerName] = useState('');
+  const [customerEmail, setCustomerEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
@@ -63,13 +64,13 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
   }
 
   // First tap just opens the phone-number prompt below the cart summary
-  // — the actual submit happens in confirmAndSend().
+  // — the actual submit happens in confirmViaWhatsApp() or payOnline().
   function startCheckout() {
     if (cartItems.length === 0) return;
     setShowPhonePrompt(true);
   }
 
-  async function confirmAndSend() {
+  async function confirmViaWhatsApp() {
     if (!customerPhone || customerPhone.replace(/\D/g, '').length < 7) {
       setSubmitError('Enter a valid phone number so the seller can reach you.');
       return;
@@ -100,6 +101,49 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
     setSubmitting(false);
     window.open(buildWhatsAppUrl(), '_blank', 'noopener,noreferrer');
     setShowPhonePrompt(false);
+  }
+
+  // Unlike confirmViaWhatsApp, this one is NOT best-effort — a checkout
+  // request that fails needs to actually stop and tell the customer,
+  // since there's no WhatsApp fallback happening afterward to paper
+  // over it. A real navigation (not window.open) to Paystack's own
+  // checkout page, since this is a genuine payment flow, not a
+  // convenience link.
+  async function payOnline() {
+    if (!customerPhone || customerPhone.replace(/\D/g, '').length < 7) {
+      setSubmitError('Enter a valid phone number so the seller can reach you.');
+      return;
+    }
+    if (!customerEmail || !/^\S+@\S+\.\S+$/.test(customerEmail)) {
+      setSubmitError('Enter a valid email — Paystack sends your payment receipt there.');
+      return;
+    }
+    setSubmitting(true);
+    setSubmitError('');
+
+    try {
+      const res = await fetch('/api/catalogue/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          slug,
+          customerPhone,
+          customerName,
+          customerEmail,
+          items: cartItems.map((row) => ({ productId: row.product.id, qty: row.qty })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setSubmitting(false);
+        setSubmitError(data.error || 'Could not start checkout.');
+        return;
+      }
+      window.location.href = data.authorization_url;
+    } catch {
+      setSubmitting(false);
+      setSubmitError('Could not start checkout — check your connection and try again.');
+    }
   }
 
   return (
@@ -194,7 +238,7 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
             ) : (
               <div>
                 <p style={{ margin: '0 0 8px', fontSize: 12.5, color: '#6b6255', fontWeight: 600 }}>
-                  So the seller can reach you — this doesn&apos;t replace WhatsApp, just helps them keep track.
+                  So the seller can reach you.
                 </p>
                 <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                   <input
@@ -212,21 +256,41 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
                     style={{ flex: 1, padding: '10px 12px', border: '1px solid #e6ddd0', borderRadius: 8, fontSize: 14 }}
                   />
                 </div>
+                {canPayOnline && (
+                  <input
+                    type="email"
+                    placeholder="Your email (only needed to pay online)"
+                    value={customerEmail}
+                    onChange={(e) => setCustomerEmail(e.target.value)}
+                    style={{ width: '100%', padding: '10px 12px', border: '1px solid #e6ddd0', borderRadius: 8, fontSize: 14, marginBottom: 8, boxSizing: 'border-box' }}
+                  />
+                )}
                 {submitError && <p style={{ color: '#a63a3a', fontSize: 12.5, margin: '0 0 8px' }}>{submitError}</p>}
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button
-                    onClick={confirmAndSend}
-                    disabled={submitting}
-                    style={{ flex: 1, background: '#25D366', color: '#fff', border: 'none', borderRadius: 10, padding: '13px', fontWeight: 700, fontSize: 14.5, cursor: 'pointer' }}
-                  >
-                    {submitting ? 'Sending…' : `Send order — ${formatNaira(total)}`}
-                  </button>
-                  <button
-                    onClick={() => setShowPhonePrompt(false)}
-                    style={{ background: 'none', border: '1px solid #e6ddd0', color: '#3a332c', borderRadius: 10, padding: '13px 16px', cursor: 'pointer' }}
-                  >
-                    Back
-                  </button>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {canPayOnline && (
+                    <button
+                      onClick={payOnline}
+                      disabled={submitting}
+                      style={{ background: '#d97a2b', color: '#fff', border: 'none', borderRadius: 10, padding: '13px', fontWeight: 700, fontSize: 14.5, cursor: 'pointer' }}
+                    >
+                      {submitting ? 'Starting checkout…' : `Pay now — ${formatNaira(total)}`}
+                    </button>
+                  )}
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                      onClick={confirmViaWhatsApp}
+                      disabled={submitting}
+                      style={{ flex: 1, background: canPayOnline ? 'none' : '#25D366', border: canPayOnline ? '1px solid #25D366' : 'none', color: canPayOnline ? '#1a2a4a' : '#fff', borderRadius: 10, padding: '13px', fontWeight: 700, fontSize: 14.5, cursor: 'pointer' }}
+                    >
+                      {submitting ? 'Sending…' : canPayOnline ? 'Order via WhatsApp instead' : `Send order — ${formatNaira(total)}`}
+                    </button>
+                    <button
+                      onClick={() => setShowPhonePrompt(false)}
+                      style={{ background: 'none', border: '1px solid #e6ddd0', color: '#3a332c', borderRadius: 10, padding: '13px 16px', cursor: 'pointer' }}
+                    >
+                      Back
+                    </button>
+                  </div>
                 </div>
               </div>
             )}

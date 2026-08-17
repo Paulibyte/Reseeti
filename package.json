@@ -1,6 +1,6 @@
 {
   "name": "reseeti-app",
-  "version": "43.0.0",
+  "version": "44.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { createClient } from '../../lib/supabaseClient';
 import AppVersion from './AppVersion';
 import { csrfFetch } from '../../lib/csrfFetch';
@@ -13,8 +13,40 @@ export default function BusinessSettings({ business, onSaved, onClose }) {
   const [invoicePrefix, setInvoicePrefix] = useState(business.invoice_prefix || 'INV');
   const [logoUrl, setLogoUrl] = useState(business.logo_url || '');
   const [bankName, setBankName] = useState(business.bank_name || '');
+  const [bankCode, setBankCode] = useState(business.bank_code || '');
   const [bankAccountName, setBankAccountName] = useState(business.bank_account_name || '');
   const [bankAccountNumber, setBankAccountNumber] = useState(business.bank_account_number || '');
+  const [bankList, setBankList] = useState([]);
+  const [subaccountCode, setSubaccountCode] = useState(business.paystack_subaccount_code || '');
+  const [enablingPayments, setEnablingPayments] = useState(false);
+  const [enablePaymentsError, setEnablePaymentsError] = useState('');
+  const [enablePaymentsSuccess, setEnablePaymentsSuccess] = useState('');
+
+  useEffect(() => {
+    if (business.plan !== 'pro') return;
+    (async () => {
+      const res = await fetch('/api/paystack/banks');
+      if (res.ok) {
+        const data = await res.json();
+        setBankList(data.banks || []);
+      }
+    })();
+  }, []);
+
+  async function enableOnlinePayments() {
+    setEnablingPayments(true);
+    setEnablePaymentsError('');
+    setEnablePaymentsSuccess('');
+    const res = await csrfFetch('/api/catalogue/enable-payments', { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    setEnablingPayments(false);
+    if (!res.ok) {
+      setEnablePaymentsError(data.error || 'Could not enable online payments.');
+      return;
+    }
+    setSubaccountCode(data.subaccountCode);
+    setEnablePaymentsSuccess(`Verified — payments will settle to ${data.resolvedAccountName}.`);
+  }
   const [termsAndConditions, setTermsAndConditions] = useState(business.terms_and_conditions || '');
   const [signatureUrl, setSignatureUrl] = useState(business.signature_url || '');
   const [vatEnabled, setVatEnabled] = useState(business.vat_enabled || false);
@@ -153,6 +185,7 @@ export default function BusinessSettings({ business, onSaved, onClose }) {
       .update({
         name, phone, address, logo_url: logoUrl, invoice_prefix: invoicePrefix,
         bank_name: bankName || null,
+        bank_code: bankCode || null,
         bank_account_name: bankAccountName || null,
         bank_account_number: bankAccountNumber || null,
         terms_and_conditions: termsAndConditions || null,
@@ -244,9 +277,43 @@ export default function BusinessSettings({ business, onSaved, onClose }) {
       <p style={{ fontSize: 12, color: 'var(--text-faint)', margin: '-4px 0 10px' }}>
         Shown on receipts for unpaid invoices, with a QR code your customer can scan — this needs all three fields filled in to appear.
       </p>
-      <input placeholder="Bank name (e.g. GTBank)" value={bankName} onChange={(e) => setBankName(e.target.value)} style={inputStyle} />
+      {business.plan === 'pro' && bankList.length > 0 ? (
+        <select
+          value={bankCode}
+          onChange={(e) => {
+            const bank = bankList.find((b) => b.code === e.target.value);
+            setBankCode(e.target.value);
+            setBankName(bank?.name || '');
+          }}
+          style={inputStyle}
+        >
+          <option value="">Select your bank…</option>
+          {bankList.map((b) => <option key={b.code} value={b.code}>{b.name}</option>)}
+        </select>
+      ) : (
+        <input placeholder="Bank name (e.g. GTBank)" value={bankName} onChange={(e) => setBankName(e.target.value)} style={inputStyle} />
+      )}
       <input placeholder="Account name" value={bankAccountName} onChange={(e) => setBankAccountName(e.target.value)} style={inputStyle} />
       <input placeholder="Account number" value={bankAccountNumber} onChange={(e) => setBankAccountNumber(e.target.value)} style={inputStyle} />
+
+      {business.plan === 'pro' && (
+        <>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '10px 0' }}>
+            To let customers pay straight from your online catalogue, verify these details — payments settle directly
+            to this account; Reseeti never holds or touches the money.
+          </p>
+          <button
+            type="button"
+            onClick={enableOnlinePayments}
+            disabled={enablingPayments || !bankCode || !bankAccountNumber}
+            style={{ background: subaccountCode ? 'var(--success-bg)' : 'var(--orange)', color: subaccountCode ? 'var(--success)' : '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 700, fontSize: 13, cursor: 'pointer', marginBottom: 8 }}
+          >
+            {enablingPayments ? 'Verifying…' : subaccountCode ? '✓ Online payments active — re-verify' : 'Verify & enable online payments'}
+          </button>
+          {enablePaymentsError && <p style={{ color: 'var(--danger)', fontSize: 12.5, marginBottom: 8 }}>{enablePaymentsError}</p>}
+          {enablePaymentsSuccess && <p style={{ color: 'var(--success)', fontSize: 12.5, marginBottom: 8 }}>{enablePaymentsSuccess}</p>}
+        </>
+      )}
 
       <h4 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', fontSize: 13.5, margin: '18px 0 8px', textTransform: 'uppercase', letterSpacing: 0.3 }}>
         Signature

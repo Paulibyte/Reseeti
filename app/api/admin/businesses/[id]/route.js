@@ -26,6 +26,14 @@ export async function POST(req, { params }) {
       return NextResponse.json({ error: "plan must be 'free' or 'pro'" }, { status: 400 });
     }
     updates.plan = body.plan;
+    // Same downgrade safety net as the automatic expiry cron
+    // (app/api/subscription/check-expiry/route.js) — an admin manually
+    // moving a business to Free should have the same effect as the
+    // cron doing it, not leave the catalogue toggle looking "on" while
+    // the public page has already independently stopped serving it.
+    if (body.plan === 'free') {
+      updates.catalogue_enabled = false;
+    }
   }
 
   if ('monthly_invoice_limit' in body) {
