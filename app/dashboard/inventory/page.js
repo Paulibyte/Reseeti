@@ -304,15 +304,20 @@ export default function InventoryPage() {
                       borderTop: isFamily && idx > 0 ? '1px dashed var(--border)' : 'none',
                     }}
                   >
-                    <div>
-                      <p style={{ margin: 0, fontWeight: 600, color: 'var(--text)', fontSize: 14.5 }}>
-                        {isFamily ? (sizeLabel || 'Unspecified size') : p.name}
-                      </p>
-                      <p style={{ margin: 0, fontSize: 12, color: 'var(--text-faint)' }}>
-                        {!isFamily && sizeLabel ? `${sizeLabel} · ` : ''}
-                        {p.category ? `${p.category} · ` : ''}
-                        {p.barcode ? <span style={{ fontFamily: 'monospace' }}>{p.barcode}</span> : 'No barcode'}
-                      </p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      {p.photo_url && (
+                        <img src={p.photo_url} alt="" style={{ width: 34, height: 34, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--border)', flexShrink: 0 }} />
+                      )}
+                      <div>
+                        <p style={{ margin: 0, fontWeight: 600, color: 'var(--text)', fontSize: 14.5 }}>
+                          {isFamily ? (sizeLabel || 'Unspecified size') : p.name}
+                        </p>
+                        <p style={{ margin: 0, fontSize: 12, color: 'var(--text-faint)' }}>
+                          {!isFamily && sizeLabel ? `${sizeLabel} · ` : ''}
+                          {p.category ? `${p.category} · ` : ''}
+                          {p.barcode ? <span style={{ fontFamily: 'monospace' }}>{p.barcode}</span> : 'No barcode'}
+                        </p>
+                      </div>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                       <div style={{ textAlign: 'right' }}>

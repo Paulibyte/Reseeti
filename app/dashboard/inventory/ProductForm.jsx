@@ -25,6 +25,33 @@ export default function ProductForm({ business, product, familyId, familyName, o
   const [showCameraScanner, setShowCameraScanner] = useState(false);
   const cameraSupported = typeof window !== 'undefined' && isCameraScanningSupported();
 
+  // Photo — uploaded as a follow-up step after the product row itself
+  // is saved (see save() below), not bundled into the same insert/
+  // update call: a brand-new product has no id to build the storage
+  // path from until after that first insert returns one.
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(product?.photo_url || '');
+  const [removePhoto, setRemovePhoto] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+
+  function handlePhotoChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      setError('Photo must be under 2MB.');
+      return;
+    }
+    setPhotoFile(file);
+    setRemovePhoto(false);
+    setPhotoPreview(URL.createObjectURL(file));
+  }
+
+  function clearPhoto() {
+    setPhotoFile(null);
+    setPhotoPreview('');
+    setRemovePhoto(true);
+  }
+
   function set(field, value) {
     setForm((f) => ({ ...f, [field]: value }));
   }
@@ -68,6 +95,12 @@ export default function ProductForm({ business, product, familyId, familyName, o
     // enough to use this way. New products aren't queued this way — an
     // offline product creation queue is a reasonable future addition
     // (see README_STAGE26.md), not built in this stage.
+    //
+    // A selected photo is silently dropped if this path is taken —
+    // photo upload needs real connectivity regardless (it's a Storage
+    // upload, not a queueable row change), so an edit made offline
+    // still saves correctly, it just won't include a newly picked
+    // photo until the next time this product is edited online.
     if (isEdit && typeof navigator !== 'undefined' && !navigator.onLine) {
       queueEdit({ table: 'products', id: product.id, changes: payload, baseUpdatedAt: product.updated_at });
       setSaving(false);
@@ -75,15 +108,43 @@ export default function ProductForm({ business, product, familyId, familyName, o
       return;
     }
 
-    const { error: err } = isEdit
-      ? await supabase.from('products').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', product.id)
-      : await supabase.from('products').insert({ ...payload, updated_at: new Date().toISOString() });
+    const { data: saved, error: err } = isEdit
+      ? await supabase.from('products').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', product.id).select('id').single()
+      : await supabase.from('products').insert({ ...payload, updated_at: new Date().toISOString() }).select('id').single();
 
-    setSaving(false);
     if (err) {
+      setSaving(false);
       setError(err.message.includes('duplicate') ? 'A product with this barcode already exists.' : err.message);
       return;
     }
+
+    const productId = saved.id;
+
+    if (photoFile) {
+      setUploadingPhoto(true);
+      const ext = photoFile.name.split('.').pop();
+      const path = `${business.id}/products/${productId}.${ext}`;
+      const { error: uploadError } = await supabase.storage
+        .from('logos')
+        .upload(path, photoFile, { upsert: true, cacheControl: '3600' });
+      if (uploadError) {
+        setUploadingPhoto(false);
+        setSaving(false);
+        setError(`Product saved, but the photo failed to upload: ${uploadError.message}`);
+        return;
+      }
+      const { data: urlData } = supabase.storage.from('logos').getPublicUrl(path);
+      // Cache-bust so the new photo shows immediately instead of a
+      // stale browser-cached version at the same URL — same reasoning
+      // as the existing logo upload in BusinessSettings.jsx.
+      const freshUrl = `${urlData.publicUrl}?t=${Date.now()}`;
+      await supabase.from('products').update({ photo_url: freshUrl }).eq('id', productId);
+      setUploadingPhoto(false);
+    } else if (removePhoto) {
+      await supabase.from('products').update({ photo_url: null }).eq('id', productId);
+    }
+
+    setSaving(false);
     onSaved();
   }
 
@@ -96,6 +157,33 @@ export default function ProductForm({ business, product, familyId, familyName, o
         <form onSubmit={save}>
           <label style={labelStyle}>Product name</label>
           <input required value={form.name} onChange={(e) => set('name', e.target.value)} style={inputStyle} placeholder="e.g. Bag of Rice" />
+
+          {business.plan === 'pro' && (
+            <>
+              <label style={labelStyle}>Photo (optional)</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
+                {photoPreview ? (
+                  <img src={photoPreview} alt="" style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--border)' }} />
+                ) : (
+                  <div style={{ width: 56, height: 56, borderRadius: 8, border: '1px dashed var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, color: 'var(--text-faint)' }}>
+                    📷
+                  </div>
+                )}
+                <label style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '7px 12px', fontSize: 12.5, cursor: 'pointer' }}>
+                  {photoPreview ? 'Change' : 'Add photo'}
+                  <input type="file" accept="image/*" onChange={handlePhotoChange} disabled={uploadingPhoto} style={{ display: 'none' }} />
+                </label>
+                {photoPreview && (
+                  <button type="button" onClick={clearPhoto} style={{ background: 'none', border: 'none', color: 'var(--danger)', fontSize: 12.5, cursor: 'pointer' }}>
+                    Remove
+                  </button>
+                )}
+              </div>
+              <p style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: -2, marginBottom: 14 }}>
+                Shown on the public catalogue if this product is set to "Show in online catalogue" below. Under 2MB.
+              </p>
+            </>
+          )}
 
           <div style={{ display: 'flex', gap: 10 }}>
             <div style={{ flex: 1 }}>
@@ -191,7 +279,7 @@ export default function ProductForm({ business, product, familyId, familyName, o
 
           <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
             <button type="submit" disabled={saving} style={{ background: 'var(--orange)', color: '#fff', border: 'none', padding: '10px 18px', borderRadius: 6, fontWeight: 700, cursor: 'pointer' }}>
-              {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Add product'}
+              {uploadingPhoto ? 'Uploading photo…' : saving ? 'Saving…' : isEdit ? 'Save changes' : 'Add product'}
             </button>
             <button type="button" onClick={onClose} style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text)', padding: '10px 18px', borderRadius: 6, cursor: 'pointer' }}>
               Cancel

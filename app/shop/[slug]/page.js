@@ -50,7 +50,7 @@ export default async function ShopPage({ params }) {
 
   const { data: products } = await supabase
     .from('products')
-    .select('id, name, price, unit, unit_value, category, stock_qty')
+    .select('id, name, price, unit, unit_value, category, stock_qty, photo_url')
     .eq('business_id', business.id)
     .eq('show_in_catalogue', true)
     .order('category')

@@ -92,13 +92,22 @@ export default function ShopCart({ businessName, businessAddress, whatsappNumber
                       opacity: outOfStock ? 0.55 : 1,
                     }}
                   >
-                    <div>
-                      <p style={{ margin: 0, fontWeight: 700, fontSize: 14.5, color: '#1a2a4a' }}>
-                        {p.name}{sizeLabel ? ` (${sizeLabel})` : ''}
-                      </p>
-                      <p style={{ margin: '2px 0 0', fontSize: 13, color: '#8a8175' }}>
-                        {formatNaira(p.price)}{outOfStock ? ' · Out of stock' : ''}
-                      </p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+                      {p.photo_url ? (
+                        <img src={p.photo_url} alt="" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 8, flexShrink: 0 }} />
+                      ) : (
+                        <div style={{ width: 48, height: 48, borderRadius: 8, background: '#f5f0e8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>
+                          🛍️
+                        </div>
+                      )}
+                      <div>
+                        <p style={{ margin: 0, fontWeight: 700, fontSize: 14.5, color: '#1a2a4a' }}>
+                          {p.name}{sizeLabel ? ` (${sizeLabel})` : ''}
+                        </p>
+                        <p style={{ margin: '2px 0 0', fontSize: 13, color: '#8a8175' }}>
+                          {formatNaira(p.price)}{outOfStock ? ' · Out of stock' : ''}
+                        </p>
+                      </div>
                     </div>
                     {!outOfStock && (
                       qty === 0 ? (
