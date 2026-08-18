@@ -150,6 +150,8 @@ export default function AnalyticsPage() {
   const [items, setItems] = useState([]);
   const [payments, setPayments] = useState([]);
   const [expenses, setExpenses] = useState([]);
+  const [catalogueViews, setCatalogueViews] = useState([]);
+  const [catalogueOrders, setCatalogueOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [selectedDate, setSelectedDate] = useState(() => {
@@ -178,6 +180,24 @@ export default function AnalyticsPage() {
       .select('id, category, amount, expense_date')
       .eq('business_id', biz.id);
     setExpenses(exps || []);
+
+    // Catalogue analytics (Stage 47) — only meaningful for Pro
+    // businesses (the catalogue itself is Pro-only), so skip the
+    // queries entirely for a Free-plan business rather than running
+    // them against tables that would just come back empty.
+    if (biz.plan === 'pro') {
+      const { data: views } = await supabase
+        .from('catalogue_views')
+        .select('created_at')
+        .eq('business_id', biz.id);
+      setCatalogueViews(views || []);
+
+      const { data: cOrders } = await supabase
+        .from('catalogue_orders')
+        .select('items, total, payment_status, status, created_at')
+        .eq('business_id', biz.id);
+      setCatalogueOrders(cOrders || []);
+    }
 
     // invoice_items don't carry business_id directly, so scope through
     // this business's own invoice ids (RLS also enforces this server-side).
@@ -473,6 +493,49 @@ export default function AnalyticsPage() {
     };
   }, [payments, selectedDate]);
 
+  const catalogueStats = useMemo(() => {
+    const now = new Date();
+    const days = (n) => {
+      const d = new Date(now);
+      d.setDate(d.getDate() - n);
+      return d;
+    };
+    const since30 = days(30);
+    const since7 = days(7);
+
+    const viewsIn = (from) => catalogueViews.filter((v) => new Date(v.created_at) >= from).length;
+    const ordersIn = (from) => catalogueOrders.filter((o) => new Date(o.created_at) >= from);
+
+    const orders30 = ordersIn(since30);
+    const revenue30 = orders30.reduce((s, o) => s + Number(o.total || 0), 0);
+    const paidOnline30 = orders30.filter((o) => o.payment_status === 'paid').length;
+    const views30 = viewsIn(since30);
+
+    // Top items, derived from every order's snapshotted line items
+    // (Stage 45's `items` jsonb — no join needed, no join possible if a
+    // product's since been deleted).
+    const itemTotals = {};
+    for (const o of orders30) {
+      for (const it of o.items || []) {
+        if (!itemTotals[it.name]) itemTotals[it.name] = { name: it.name, qty: 0, revenue: 0 };
+        itemTotals[it.name].qty += Number(it.qty || 0);
+        itemTotals[it.name].revenue += Number(it.qty || 0) * Number(it.price || 0);
+      }
+    }
+    const topItems = Object.values(itemTotals).sort((a, b) => b.qty - a.qty).slice(0, 5);
+
+    return {
+      views7: viewsIn(since7),
+      views30,
+      orders30: orders30.length,
+      revenue30,
+      paidOnline30,
+      whatsAppOnly30: orders30.length - paidOnline30,
+      conversionRate: views30 > 0 ? (orders30.length / views30) * 100 : 0,
+      topItems,
+    };
+  }, [catalogueViews, catalogueOrders]);
+
   if (loading || !business) {
     return <main style={{ padding: 40, color: 'var(--text-muted)' }}>Loading…</main>;
   }
@@ -563,6 +626,36 @@ export default function AnalyticsPage() {
               ))}
             </div>
           </div>
+
+          {business.plan === 'pro' && (
+            <>
+              <p style={{ margin: '0 0 8px', fontWeight: 700, color: 'var(--text-muted)', fontSize: 12.5, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                Catalogue (last 30 days)
+              </p>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
+                <StatCard label="Shop visits" value={catalogueStats.views30} sub={`${catalogueStats.views7} in the last 7 days`} />
+                <StatCard label="Orders placed" value={catalogueStats.orders30}
+                  sub={`${catalogueStats.conversionRate.toFixed(1)}% of visits ordered`} />
+                <StatCard label="Catalogue revenue" value={formatNaira(catalogueStats.revenue30)} />
+                <StatCard label="Paid online vs WhatsApp" value={`${catalogueStats.paidOnline30} / ${catalogueStats.whatsAppOnly30}`}
+                  sub="online-paid / WhatsApp-only orders" />
+              </div>
+
+              {catalogueStats.topItems.length > 0 && (
+                <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: 16, marginBottom: 18, maxWidth: 420 }}>
+                  <p style={{ margin: '0 0 10px', fontWeight: 700, color: 'var(--text)', fontSize: 14 }}>Top catalogue items</p>
+                  {catalogueStats.topItems.map((it, idx) => (
+                    <div key={it.name} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: idx === catalogueStats.topItems.length - 1 ? 'none' : '1px solid var(--border)' }}>
+                      <span style={{ fontSize: 13.5, color: 'var(--text)' }}>
+                        {idx === 0 && '🏆 '}{it.name} <span style={{ color: 'var(--text-faint)', fontSize: 11.5 }}>· {it.qty} sold</span>
+                      </span>
+                      <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text)' }}>{formatNaira(it.revenue)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
 
           <p style={{ margin: '0 0 8px', fontWeight: 700, color: 'var(--text-muted)', fontSize: 12.5, textTransform: 'uppercase', letterSpacing: 0.4 }}>Invoices</p>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>

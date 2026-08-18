@@ -1,0 +1,13 @@
+-- Stage 48 migration: run in the Supabase SQL editor after schema_stage47.
+--
+-- Custom branding for the public catalogue — the last proposal item
+-- besides a dedicated Catalogue nav page. The logo itself needed no new
+-- column at all (businesses.logo_url already existed, from the invoice
+-- branding feature — the shop page just never displayed it until now).
+-- The one genuinely new piece is an accent color, since every shop page
+-- was hardcoded to the same fixed orange regardless of the business's
+-- own identity.
+alter table businesses add column if not exists catalogue_accent_color text not null default '#d97a2b';
+-- Default matches the color every shop page already used before this
+-- stage, so nobody's existing page changes appearance unless they
+-- deliberately pick a different one in Settings.

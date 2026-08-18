@@ -16,7 +16,7 @@ export default async function ThankYouPage({ params, searchParams }) {
 
   const { data: business } = await supabase
     .from('businesses')
-    .select('id, name, whatsapp_number')
+    .select('id, name, whatsapp_number, logo_url')
     .eq('catalogue_slug', params.slug)
     .maybeSingle();
 
@@ -36,6 +36,9 @@ export default async function ThankYouPage({ params, searchParams }) {
   return (
     <main style={{ maxWidth: 420, margin: '0 auto', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 20px', fontFamily: 'sans-serif', background: '#faf6ef', textAlign: 'center' }}>
       <div>
+        {business?.logo_url && (
+          <img src={business.logo_url} alt="" style={{ width: 56, height: 56, objectFit: 'contain', borderRadius: 10, marginBottom: 12 }} />
+        )}
         <div style={{ fontSize: 48, marginBottom: 12 }}>{paid ? '✅' : '⏳'}</div>
         <h1 style={{ fontSize: 20, color: '#1a2a4a', margin: '0 0 8px' }}>
           {paid ? 'Payment received!' : 'Checking your payment…'}

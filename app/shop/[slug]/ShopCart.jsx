@@ -17,7 +17,8 @@ function toWhatsAppDigits(input) {
   return '234' + digits;
 }
 
-export default function ShopCart({ slug, businessName, businessAddress, whatsappNumber, canPayOnline, products }) {
+export default function ShopCart({ slug, businessName, businessAddress, whatsappNumber, canPayOnline, logoUrl, accentColor, products }) {
+  const accent = accentColor || '#d97a2b';
   const [cart, setCart] = useState({}); // product_id -> qty
   const [showPhonePrompt, setShowPhonePrompt] = useState(false);
   const [customerPhone, setCustomerPhone] = useState('');
@@ -148,10 +149,14 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
 
   return (
     <main style={{ maxWidth: 640, margin: '0 auto', paddingBottom: itemCount > 0 ? 96 : 40, fontFamily: 'sans-serif', background: '#faf6ef', minHeight: '100vh' }}>
+      <div style={{ height: 4, background: accent }} />
       <header style={{ padding: '28px 20px 20px', textAlign: 'center', borderBottom: '1px solid #e6ddd0' }}>
+        {logoUrl && (
+          <img src={logoUrl} alt="" style={{ width: 64, height: 64, objectFit: 'contain', borderRadius: 12, marginBottom: 12 }} />
+        )}
         <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: '#1a2a4a' }}>{businessName}</h1>
         {businessAddress && <p style={{ margin: '6px 0 0', fontSize: 13, color: '#8a8175' }}>{businessAddress}</p>}
-        <p style={{ margin: '10px 0 0', fontSize: 12.5, color: '#8a8175' }}>Pick what you need, then send your order on WhatsApp.</p>
+        <p style={{ margin: '10px 0 0', fontSize: 12.5, color: '#8a8175' }}>Pick what you need, then order below.</p>
       </header>
 
       <div style={{ padding: '16px 16px 0' }}>
@@ -199,7 +204,7 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
                       qty === 0 ? (
                         <button
                           onClick={() => setQty(p.id, 1)}
-                          style={{ background: '#d97a2b', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 700, fontSize: 13, cursor: 'pointer', flexShrink: 0 }}
+                          style={{ background: accent, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 700, fontSize: 13, cursor: 'pointer', flexShrink: 0 }}
                         >
                           Add
                         </button>
@@ -271,7 +276,7 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
                     <button
                       onClick={payOnline}
                       disabled={submitting}
-                      style={{ background: '#d97a2b', color: '#fff', border: 'none', borderRadius: 10, padding: '13px', fontWeight: 700, fontSize: 14.5, cursor: 'pointer' }}
+                      style={{ background: accent, color: '#fff', border: 'none', borderRadius: 10, padding: '13px', fontWeight: 700, fontSize: 14.5, cursor: 'pointer' }}
                     >
                       {submitting ? 'Starting checkout…' : `Pay now — ${formatNaira(total)}`}
                     </button>

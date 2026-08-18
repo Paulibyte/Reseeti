@@ -74,6 +74,7 @@ export default function BusinessSettings({ business, onSaved, onClose }) {
   // client update, so toggling it only ever happens through the two
   // dedicated API routes (see toggleCatalogue below).
   const [whatsappNumber, setWhatsappNumber] = useState(business.whatsapp_number || '');
+  const [accentColor, setAccentColor] = useState(business.catalogue_accent_color || '#d97a2b');
   const [catalogueEnabled, setCatalogueEnabled] = useState(business.catalogue_enabled || false);
   const [catalogueSlug, setCatalogueSlug] = useState(business.catalogue_slug || null);
   const [togglingCatalogue, setTogglingCatalogue] = useState(false);
@@ -203,6 +204,7 @@ export default function BusinessSettings({ business, onSaved, onClose }) {
         whatsapp_reminders_enabled: whatsappRemindersEnabled,
         reminder_days_after: Math.max(Number(reminderDaysAfter) || 3, 1),
         whatsapp_number: whatsappNumber || null,
+        catalogue_accent_color: accentColor || '#d97a2b',
       })
       .eq('id', business.id);
     setSaving(false);
@@ -509,6 +511,22 @@ export default function BusinessSettings({ business, onSaved, onClose }) {
           <p style={{ fontSize: 11.5, color: 'var(--text-faint)', margin: '0 0 16px' }}>
             Where "Order via WhatsApp" sends the customer — can be a different line than the one you log in with. Orders
             won't work until this is set and saved.
+          </p>
+
+          <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>
+            Catalogue accent color
+          </label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+            <input
+              type="color"
+              value={accentColor}
+              onChange={(e) => setAccentColor(e.target.value)}
+              style={{ width: 44, height: 34, border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', padding: 2, background: 'var(--bg)' }}
+            />
+            <span style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{accentColor}</span>
+          </div>
+          <p style={{ fontSize: 11.5, color: 'var(--text-faint)', margin: '0 0 16px' }}>
+            Used for buttons and highlights on your public catalogue page — your logo (if you've uploaded one above) shows there too.
           </p>
         </>
       )}

@@ -23,7 +23,7 @@ export default async function ShopPage({ params }) {
 
   const { data: business } = await supabase
     .from('businesses')
-    .select('id, name, address, whatsapp_number, plan, catalogue_enabled, paystack_subaccount_code')
+    .select('id, name, address, whatsapp_number, plan, catalogue_enabled, paystack_subaccount_code, logo_url, catalogue_accent_color')
     .eq('catalogue_slug', params.slug)
     .maybeSingle();
 
@@ -56,6 +56,13 @@ export default async function ShopPage({ params }) {
     .order('category')
     .order('name');
 
+  // Fire-and-forget, deliberately not awaited — recording a page view
+  // (Stage 47, for the new Catalogue section on Analytics) should never
+  // slow down or risk breaking the actual page a real customer is
+  // waiting to see. A failed insert here is just a slightly-undercounted
+  // stat, not a real problem.
+  supabase.from('catalogue_views').insert({ business_id: business.id }).then(() => {}, () => {});
+
   return (
     <ShopCart
       slug={params.slug}
@@ -63,6 +70,8 @@ export default async function ShopPage({ params }) {
       businessAddress={business.address}
       whatsappNumber={business.whatsapp_number}
       canPayOnline={!!business.paystack_subaccount_code}
+      logoUrl={business.logo_url}
+      accentColor={business.catalogue_accent_color}
       products={products || []}
     />
   );
