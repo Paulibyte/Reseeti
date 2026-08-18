@@ -10,6 +10,7 @@ export const NAV_ITEMS = [
   { href: '/dashboard#invoices', label: 'Invoices', icon: '🧾', permission: null },
   { href: '/dashboard/customers', label: 'Customers', icon: '👥', permission: 'manageCustomers' },
   { href: '/dashboard/inventory', label: 'Inventory', icon: '📦', permission: 'manageInventory' },
+  { href: '/dashboard/catalogue', label: 'Catalogue', icon: '🛍️', permission: 'manageInventory' },
   { href: '/dashboard/expenses', label: 'Expenses', icon: '🧾', permission: 'manageExpenses' },
   { href: '/dashboard/cashbook', label: 'Cashbook', icon: '📒', permission: 'manageCashbook' },
   { href: '/dashboard/payments', label: 'Payments', icon: '💳', permission: 'manageSubscription' },
