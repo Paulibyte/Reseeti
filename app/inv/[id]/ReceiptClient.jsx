@@ -105,7 +105,7 @@ function SignaturePad({ onSave }) {
   );
 }
 
-export default function ReceiptClient({ invoice, business, signature }) {
+export default function ReceiptClient({ invoice, business, signature, offlineMode }) {
   const receiptRef = useRef(null);
   const barcodeCanvasRef = useRef(null);
   const [downloading, setDownloading] = useState(false);
@@ -493,12 +493,19 @@ export default function ReceiptClient({ invoice, business, signature }) {
         <PrintReceiptButton business={business} invoice={invoice} items={invoice.invoice_items} />
       </div>
 
-      <button
-        onClick={() => { setShowEmailPanel(!showEmailPanel); setEmailError(''); }}
-        style={{ width: '100%', marginTop: 10, background: 'none', border: '1.5px solid var(--border)', color: 'var(--text)', padding: '11px', borderRadius: 4, fontWeight: 700, cursor: 'pointer' }}
-      >
-        ✉ Email invoice
-      </button>
+      {!offlineMode && (
+        <button
+          onClick={() => { setShowEmailPanel(!showEmailPanel); setEmailError(''); }}
+          style={{ width: '100%', marginTop: 10, background: 'none', border: '1.5px solid var(--border)', color: 'var(--text)', padding: '11px', borderRadius: 4, fontWeight: 700, cursor: 'pointer' }}
+        >
+          ✉ Email invoice
+        </button>
+      )}
+      {offlineMode && (
+        <p style={{ fontSize: 11.5, color: 'var(--text-faint)', textAlign: 'center', marginTop: 10 }}>
+          Email invoice needs a connection — Download PDF and Print work fine offline.
+        </p>
+      )}
 
       {showEmailPanel && (
         <div style={{ marginTop: 10, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, padding: 14 }}>

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { createClient } from '../../lib/supabaseClient';
-import { queueDraftInvoice, syncQueue } from '../../lib/offlineQueue';
+import { queueDraftInvoice, syncQueue, getQueue } from '../../lib/offlineQueue';
 import { parkSale } from '../../lib/parkedSales';
 import { track } from '../../lib/analytics';
 import { formatNaira, formatRate } from '../../lib/format';
@@ -338,7 +338,7 @@ export default function InvoiceForm({ business, onClose, onSaved, resumeDraft, o
     // Always write to the local queue first — this never fails and never
     // waits on a network round trip, which is the whole point: the sale
     // is recorded the instant the button is tapped, connection or not.
-    queueDraftInvoice(draft);
+    const queuedEntry = queueDraftInvoice(draft);
     track('invoice_created', { total });
 
     // If we're online, immediately try to push it (and anything else
@@ -383,7 +383,14 @@ export default function InvoiceForm({ business, onClose, onSaved, resumeDraft, o
     }
 
     setSaving(false);
-    onSaved(depleted);
+    // Still present in the queue after the sync attempt above means it
+    // genuinely never made it to the server — either navigator.onLine
+    // was false to begin with, or the sync attempt itself failed. Only
+    // in that case does the caller get a reference to show an offline
+    // receipt from; a successfully synced sale passes null here, and
+    // nothing about that path's existing behavior changes.
+    const stillQueued = getQueue().some((d) => d.localId === queuedEntry.localId);
+    onSaved(depleted, stillQueued ? queuedEntry : null);
   }
 
   return (

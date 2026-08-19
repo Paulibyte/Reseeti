@@ -10,6 +10,7 @@ import DashboardShell from './DashboardShell';
 import VirtualInvoiceList from './VirtualInvoiceList';
 import AiInsights from './AiInsights';
 import OnboardingChecklist from './OnboardingChecklist';
+import OfflineDraftReceipt from './OfflineDraftReceipt';
 import { useRealtimeSync } from '../../lib/useRealtimeSync';
 import { getQueue, syncQueue, pendingCount, onBackgroundSyncMessage, getEditConflicts } from '../../lib/offlineQueue';
 import { listParkedSales } from '../../lib/parkedSales';
@@ -52,6 +53,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [resumeDraft, setResumeDraft] = useState(null);
+  const [offlineReceiptEntry, setOfflineReceiptEntry] = useState(null);
   const [showParkedSales, setShowParkedSales] = useState(false);
   const [parkedCount, setParkedCount] = useState(0);
   const [showPendingOrders, setShowPendingOrders] = useState(false);
@@ -569,7 +571,7 @@ export default function Dashboard() {
           resumeDraft={resumeDraft}
           onClose={() => { setShowForm(false); setResumeDraft(null); }}
           onParked={() => { setShowForm(false); setResumeDraft(null); refreshParkedCount(); }}
-          onSaved={(depleted) => {
+          onSaved={(depleted, offlineEntry) => {
             setShowForm(false);
             setResumeDraft(null);
             setQueuedDrafts(getQueue());
@@ -577,7 +579,16 @@ export default function Dashboard() {
             load();
             setInvoiceRefreshToken((t) => t + 1);
             if (depleted && depleted.length) setDepletedNotice(depleted);
+            if (offlineEntry) setOfflineReceiptEntry(offlineEntry);
           }}
+        />
+      )}
+
+      {offlineReceiptEntry && (
+        <OfflineDraftReceipt
+          entry={offlineReceiptEntry}
+          business={business}
+          onClose={() => setOfflineReceiptEntry(null)}
         />
       )}
 
