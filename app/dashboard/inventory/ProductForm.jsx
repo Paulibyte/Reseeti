@@ -9,6 +9,7 @@ export default function ProductForm({ business, product, familyId, familyName, o
   const supabase = createClient();
   const isEdit = !!product;
   const [form, setForm] = useState({
+    type: product?.type || 'product',
     name: product?.name || familyName || '',
     barcode: product?.barcode || '',
     category: product?.category || '',
@@ -63,13 +64,20 @@ export default function ProductForm({ business, product, familyId, familyName, o
 
     const payload = {
       business_id: business.id,
+      type: form.type,
       name: form.name,
       barcode: form.barcode || null,
       category: form.category || null,
       price: Number(form.price) || 0,
       cost_price: form.cost_price === '' ? null : Number(form.cost_price),
-      stock_qty: Number(form.stock_qty) || 0,
-      low_stock_threshold: Number(form.low_stock_threshold) || 0,
+      // Services carry no real stock — kept at 0 rather than whatever
+      // was last in the form, so switching a product to a service can't
+      // accidentally leave a stale, meaningless quantity behind. See
+      // schema_stage49.sql for why 0 is safe here: every stock-aware
+      // display in the app already treats type==='service' as
+      // "don't apply out-of-stock logic," not "read this number."
+      stock_qty: form.type === 'service' ? 0 : (Number(form.stock_qty) || 0),
+      low_stock_threshold: form.type === 'service' ? 0 : (Number(form.low_stock_threshold) || 0),
       unit: form.unit || null,
       unit_value: form.unit_value === '' ? null : Number(form.unit_value),
       show_in_catalogue: business.plan === 'pro' ? form.show_in_catalogue : false,
@@ -152,11 +160,32 @@ export default function ProductForm({ business, product, familyId, familyName, o
     <div style={{ position: 'fixed', inset: 0, background: 'var(--overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 50 }}>
       <div style={{ background: 'var(--surface)', borderRadius: 10, padding: 24, maxWidth: 420, width: '100%', borderTop: '5px solid var(--orange)' }}>
         <h3 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', marginTop: 0 }}>
-          {isEdit ? 'Edit product' : familyId ? `Add a size/variant of "${familyName}"` : 'Add product'}
+          {isEdit
+            ? `Edit ${form.type === 'service' ? 'service' : 'product'}`
+            : familyId ? `Add a size/variant of "${familyName}"` : 'Add product or service'}
         </h3>
         <form onSubmit={save}>
-          <label style={labelStyle}>Product name</label>
-          <input required value={form.name} onChange={(e) => set('name', e.target.value)} style={inputStyle} placeholder="e.g. Bag of Rice" />
+          {!familyId && (
+            <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+              {['product', 'service'].map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => set('type', t)}
+                  style={{
+                    flex: 1, padding: '8px', borderRadius: 6, fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                    border: `1px solid ${form.type === t ? 'var(--orange)' : 'var(--border)'}`,
+                    background: form.type === t ? 'var(--orange-bg)' : 'var(--bg)',
+                    color: form.type === t ? 'var(--orange-dark)' : 'var(--text-muted)',
+                  }}
+                >
+                  {t === 'product' ? '📦 Product' : '🛎️ Service'}
+                </button>
+              ))}
+            </div>
+          )}
+          <label style={labelStyle}>{form.type === 'service' ? 'Service name' : 'Product name'}</label>
+          <input required value={form.name} onChange={(e) => set('name', e.target.value)} style={inputStyle} placeholder={form.type === 'service' ? 'e.g. Consultation Fee' : 'e.g. Bag of Rice'} />
 
           {business.plan === 'pro' && (
             <>
@@ -226,47 +255,53 @@ export default function ProductForm({ business, product, familyId, familyName, o
               <label style={labelStyle}>Category (optional)</label>
               <input value={form.category} onChange={(e) => set('category', e.target.value)} style={inputStyle} placeholder="e.g. Beverages" />
             </div>
-            <div style={{ flex: 1 }}>
-              <label style={labelStyle}>Barcode (optional)</label>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <input
-                  value={form.barcode}
-                  onChange={(e) => set('barcode', e.target.value)}
-                  // A barcode scanner sends Enter right after the code —
-                  // without this, that Enter would submit the whole form
-                  // immediately, before price/stock/etc. are filled in
-                  // for a new product.
-                  onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
-                  style={{ ...inputStyle, fontFamily: 'monospace', flex: 1 }}
-                  placeholder="Scan or type"
-                />
-                {cameraSupported && (
-                  <button
-                    type="button"
-                    onClick={() => setShowCameraScanner(true)}
-                    title="Scan with camera"
-                    style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, padding: '0 10px', cursor: 'pointer', fontSize: 15 }}
-                  >
-                    📷
-                  </button>
-                )}
+            {form.type === 'product' && (
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Barcode (optional)</label>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input
+                    value={form.barcode}
+                    onChange={(e) => set('barcode', e.target.value)}
+                    // A barcode scanner sends Enter right after the code —
+                    // without this, that Enter would submit the whole form
+                    // immediately, before price/stock/etc. are filled in
+                    // for a new product.
+                    onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
+                    style={{ ...inputStyle, fontFamily: 'monospace', flex: 1 }}
+                    placeholder="Scan or type"
+                  />
+                  {cameraSupported && (
+                    <button
+                      type="button"
+                      onClick={() => setShowCameraScanner(true)}
+                      title="Scan with camera"
+                      style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, padding: '0 10px', cursor: 'pointer', fontSize: 15 }}
+                    >
+                      📷
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
-          <div style={{ display: 'flex', gap: 10 }}>
-            <div style={{ flex: 1 }}>
-              <label style={labelStyle}>Current stock</label>
-              <input required type="number" min="0" value={form.stock_qty} onChange={(e) => set('stock_qty', e.target.value)} style={inputStyle} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <label style={labelStyle}>Low stock alert at</label>
-              <input type="number" min="0" value={form.low_stock_threshold} onChange={(e) => set('low_stock_threshold', e.target.value)} style={inputStyle} />
-            </div>
-          </div>
-          <p style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: -6 }}>
-            You'll see a low-stock warning once quantity on hand drops to or below this number.
-          </p>
+          {form.type === 'product' && (
+            <>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <div style={{ flex: 1 }}>
+                  <label style={labelStyle}>Current stock</label>
+                  <input required type="number" min="0" value={form.stock_qty} onChange={(e) => set('stock_qty', e.target.value)} style={inputStyle} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={labelStyle}>Low stock alert at</label>
+                  <input type="number" min="0" value={form.low_stock_threshold} onChange={(e) => set('low_stock_threshold', e.target.value)} style={inputStyle} />
+                </div>
+              </div>
+              <p style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: -6 }}>
+                You'll see a low-stock warning once quantity on hand drops to or below this number.
+              </p>
+            </>
+          )}
 
           {business.plan === 'pro' && (
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, cursor: 'pointer', fontSize: 13.5, color: 'var(--text)' }}>

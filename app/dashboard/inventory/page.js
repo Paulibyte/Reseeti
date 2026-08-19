@@ -115,12 +115,17 @@ export default function InventoryPage() {
     load();
   }
 
+  // Services (Stage 49) are excluded from both — they carry no real
+  // stock at all (always 0), so without this every service would show
+  // up permanently flagged "out of stock," which isn't a meaningful
+  // warning for something that was never physical inventory to begin
+  // with.
   const outOfStock = useMemo(
-    () => products.filter((p) => Number(p.stock_qty) <= 0),
+    () => products.filter((p) => p.type !== 'service' && Number(p.stock_qty) <= 0),
     [products]
   );
   const lowStock = useMemo(
-    () => products.filter((p) => Number(p.stock_qty) > 0 && Number(p.stock_qty) <= Number(p.low_stock_threshold)),
+    () => products.filter((p) => p.type !== 'service' && Number(p.stock_qty) > 0 && Number(p.stock_qty) <= Number(p.low_stock_threshold)),
     [products]
   );
 
@@ -292,8 +297,8 @@ export default function InventoryPage() {
                 </div>
               )}
               {variants.map((p, idx) => {
-                const isOut = Number(p.stock_qty) <= 0;
-                const isLow = !isOut && Number(p.stock_qty) <= Number(p.low_stock_threshold);
+                const isOut = p.type !== 'service' && Number(p.stock_qty) <= 0;
+                const isLow = p.type !== 'service' && !isOut && Number(p.stock_qty) <= Number(p.low_stock_threshold);
                 const sizeLabel = p.unit_value ? `${p.unit_value}${p.unit || ''}` : (p.unit || null);
                 return (
                   <div
@@ -315,7 +320,7 @@ export default function InventoryPage() {
                         <p style={{ margin: 0, fontSize: 12, color: 'var(--text-faint)' }}>
                           {!isFamily && sizeLabel ? `${sizeLabel} · ` : ''}
                           {p.category ? `${p.category} · ` : ''}
-                          {p.barcode ? <span style={{ fontFamily: 'monospace' }}>{p.barcode}</span> : 'No barcode'}
+                          {p.type === 'service' ? 'Service' : (p.barcode ? <span style={{ fontFamily: 'monospace' }}>{p.barcode}</span> : 'No barcode')}
                         </p>
                       </div>
                     </div>
@@ -323,22 +328,26 @@ export default function InventoryPage() {
                       <div style={{ textAlign: 'right' }}>
                         <p style={{ margin: 0, fontWeight: 700, color: 'var(--text)', fontSize: 14 }}>{formatNaira(p.price)}</p>
                         <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: isOut ? 'var(--danger)' : isLow ? 'var(--orange-dark)' : 'var(--text-muted)' }}>
-                          {isOut ? 'Out of stock' : `${p.stock_qty} in stock${isLow ? ' — low' : ''}`}
+                          {p.type === 'service' ? 'Service' : isOut ? 'Out of stock' : `${p.stock_qty} in stock${isLow ? ' — low' : ''}`}
                         </p>
                       </div>
                       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                        <button
-                          onClick={() => setAdjustingProduct(p)}
-                          style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '6px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}
-                        >
-                          Adjust
-                        </button>
-                        <button
-                          onClick={() => setHistoryProduct(p)}
-                          style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '6px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}
-                        >
-                          History
-                        </button>
+                        {p.type !== 'service' && (
+                          <>
+                            <button
+                              onClick={() => setAdjustingProduct(p)}
+                              style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '6px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}
+                            >
+                              Adjust
+                            </button>
+                            <button
+                              onClick={() => setHistoryProduct(p)}
+                              style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '6px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}
+                            >
+                              History
+                            </button>
+                          </>
+                        )}
                         {!isFamily && (
                           <button
                             onClick={() => { setAddVariantTo({ familyId: p.family_id || p.id, familyName: p.name }); setShowForm(true); }}

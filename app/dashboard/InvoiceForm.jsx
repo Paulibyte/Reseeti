@@ -51,7 +51,7 @@ export default function InvoiceForm({ business, onClose, onSaved, resumeDraft, o
     // <datalist>, degrades gracefully to plain typing if empty/offline)
     // and the customer dropdown can list existing profiles.
     (async () => {
-      const { data: prods } = await supabase.from('products').select('id, name, price, barcode, stock_qty').eq('business_id', business.id);
+      const { data: prods } = await supabase.from('products').select('id, name, price, barcode, stock_qty, type').eq('business_id', business.id);
       setProducts(prods || []);
       const { data: custs } = await supabase.from('customers').select('id, name, phone').eq('business_id', business.id).order('name');
       setCustomers(custs || []);
@@ -276,6 +276,8 @@ export default function InvoiceForm({ business, onClose, onSaved, resumeDraft, o
     if (!item.product_id) return null;
     const product = products.find((p) => p.id === item.product_id);
     if (!product) return null;
+    // Services (Stage 49) carry no real stock — nothing to warn about.
+    if (product.type === 'service') return null;
     if (Number(product.stock_qty) <= 0) {
       return { level: 'danger', text: 'Out of stock — selling anyway will take stock negative' };
     }
@@ -365,9 +367,11 @@ export default function InvoiceForm({ business, onClose, onSaved, resumeDraft, o
         if (soldProductIds.length) {
           const { data: refreshed } = await supabase
             .from('products')
-            .select('name, stock_qty')
+            .select('name, stock_qty, type')
             .in('id', soldProductIds);
-          depleted = (refreshed || []).filter((p) => Number(p.stock_qty) <= 0).map((p) => p.name);
+          // Services (Stage 49) always sit at stock_qty 0 — excluded here
+          // so a service sale never wrongly shows up as "just ran out."
+          depleted = (refreshed || []).filter((p) => p.type !== 'service' && Number(p.stock_qty) <= 0).map((p) => p.name);
         }
       } catch {
         // Sync (or the depleted-stock check) failed — the draft stays in
