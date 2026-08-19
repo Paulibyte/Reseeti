@@ -320,7 +320,19 @@ export default function ReportsPage() {
       const imgData = canvas.toDataURL('image/png');
       const pdf = new jsPDF({ unit: 'pt', format: [canvas.width / 2, canvas.height / 2] });
       pdf.addImage(imgData, 'PNG', 0, 0, canvas.width / 2, canvas.height / 2);
-      pdf.save(`${business.name.replace(/\s+/g, '_')}-statement-${month}.pdf`);
+
+      // pdf.save(filename) relies on the browser's `download` attribute
+      // to trigger an automatic file save — desktop browsers handle this
+      // fine, but mobile Safari largely ignores it, and it's unreliable
+      // inside an installed PWA on Android too (which matters here,
+      // since Reseeti actively encourages installing to the home
+      // screen). Opening the PDF in a new tab instead works everywhere:
+      // the browser's own PDF viewer takes over, and the person can use
+      // its native Share/Download/Print options from there — the
+      // standard, well-established workaround for this exact jsPDF
+      // limitation on mobile.
+      const blobUrl = pdf.output('bloburl');
+      window.open(blobUrl, '_blank');
     } finally {
       setDownloading(false);
     }

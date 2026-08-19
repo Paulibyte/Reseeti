@@ -171,7 +171,9 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
             </h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {items.map((p) => {
-                const outOfStock = Number(p.stock_qty) <= 0;
+                // Services (Stage 49) carry no real stock — always
+                // available, never shown as out of stock.
+                const outOfStock = p.type !== 'service' && Number(p.stock_qty) <= 0;
                 const qty = cart[p.id] || 0;
                 const sizeLabel = p.unit_value ? `${p.unit_value}${p.unit || ''}` : (p.unit || null);
                 return (
