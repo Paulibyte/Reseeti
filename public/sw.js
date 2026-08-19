@@ -4,9 +4,11 @@
 // runtime cache-as-you-go strategy avoids that maintenance problem
 // entirely at the cost of the very first visit needing a connection.
 
-// Bumped for Stage 20 — install no longer auto-activates (see below), so
-// old clients need the new worker's lifecycle to take over.
-const CACHE_NAME = 'reseeti-shell-v3';
+// Bumped for Stage 21 — see the RSC-request skip below. A v3 cache may
+// already hold a poisoned entry (an RSC flight response sitting where a
+// page's real HTML should be), so this bump forces those to be thrown
+// away on activate rather than living on for existing installs.
+const CACHE_NAME = 'reseeti-shell-v4';
 
 // Runtime cache is capped at this many entries. Without a limit, a
 // business that browses a lot of invoices/receipts over months would
@@ -73,6 +75,31 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Next.js's App Router fetches two fundamentally different responses
+  // from the *same URL*: a full HTML document on a real navigation (new
+  // tab, refresh, a shared link — exactly what offline "open/print"
+  // needs), and a separate "RSC" flight payload when the app itself
+  // navigates there client-side (e.g. save()'s onSaved routing straight
+  // to a freshly-synced invoice's page after Save). Both are plain GETs
+  // to the identical URL, so they'd otherwise land in the same cache
+  // slot — and Next tags the RSC response with a `Vary` header
+  // (RSC / Next-Router-State-Tree / Next-Router-Prefetch) that a later
+  // *real* navigation request, having none of those headers, can never
+  // satisfy. Net effect: the in-app client navigation caches the RSC
+  // payload under a page's URL, silently evicting or shadowing the real
+  // HTML that offline printing actually needs — cache.match() then
+  // comes back empty and the fetch throws. Since a hard/offline
+  // navigation never sends these headers itself, the RSC response is
+  // never useful as an offline fallback anyway — skip caching (and
+  // matching against) it entirely so the real document is what ends up
+  // cached at that URL.
+  const isRSCRequest = request.headers.has('RSC')
+    || request.headers.has('Next-Router-State-Tree')
+    || request.headers.has('Next-Router-Prefetch');
+  if (isRSCRequest) {
+    return;
+  }
+
   event.respondWith(
     caches.open(CACHE_NAME).then(async (cache) => {
       try {
@@ -86,8 +113,12 @@ self.addEventListener('fetch', (event) => {
         return fresh;
       } catch (err) {
         // Offline (or the request failed) — fall back to whatever we
-        // last cached for this exact URL, if anything.
-        const cached = await cache.match(request);
+        // last cached for this exact URL, if anything. ignoreVary
+        // guards against any already-poisoned entries this exact
+        // browser install cached before this fix shipped (Vary
+        // mismatches from a stray RSC response would otherwise still
+        // hide a perfectly good match).
+        const cached = await cache.match(request, { ignoreVary: true });
         if (cached) return cached;
         throw err;
       }

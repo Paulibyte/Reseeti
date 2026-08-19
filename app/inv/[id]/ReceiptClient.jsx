@@ -190,11 +190,17 @@ export default function ReceiptClient({ invoice, business, signature }) {
     try {
       const blob = await renderElementToPDFBlob(receiptRef.current);
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${invoice.invoice_number}-${(invoice.customer_name || 'invoice').replace(/\s+/g, '_')}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
+      // Previously forced a download via a synthetic <a download> click —
+      // reliable on desktop only when the click happens perfectly
+      // synchronously with the user's actual tap. Since the blob is
+      // built asynchronously (renderElementToPDFBlob awaits first), some
+      // browsers no longer treat the resulting .click() as a trusted
+      // user gesture and silently ignore it — explaining why this could
+      // fail even on desktop, not just mobile. Opening the blob URL in
+      // a new tab instead works everywhere: the browser's own PDF
+      // viewer takes over, with its native Share/Download/Print options
+      // — same fix already applied to the Reports page's PDF exports.
+      window.open(url, '_blank');
     } finally {
       setDownloading(false);
     }
