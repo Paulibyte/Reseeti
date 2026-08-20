@@ -308,12 +308,20 @@ export default function ReceiptClient({ invoice, business, signature, offlineMod
             <span>{new Date(invoice.created_at).toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
           </div>
           {invoice.estimated_delivery_date && (
-            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 12 }}>
+            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: invoice.due_date ? 2 : 12 }}>
               Estimated delivery: {new Date(invoice.estimated_delivery_date).toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' })}
             </div>
           )}
+          {invoice.due_date && (() => {
+            const overdue = !invoice.paid && new Date(invoice.due_date) < new Date(new Date().toDateString());
+            return (
+              <div style={{ fontSize: 11.5, color: overdue ? 'var(--danger)' : 'var(--text-muted)', fontWeight: overdue ? 700 : 400, marginBottom: 12 }}>
+                {overdue ? '⚠ Overdue since' : 'Payment due'}: {new Date(invoice.due_date).toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' })}
+              </div>
+            );
+          })()}
 
-          <div style={{ fontSize: 13, marginBottom: 16, marginTop: invoice.estimated_delivery_date ? 0 : 12 }}>
+          <div style={{ fontSize: 13, marginBottom: 16, marginTop: (invoice.estimated_delivery_date || invoice.due_date) ? 0 : 12 }}>
             <span style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-faint)', display: 'block' }}>Billed to</span>
             {invoice.customer_name}
           </div>

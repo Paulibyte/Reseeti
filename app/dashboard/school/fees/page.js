@@ -42,7 +42,12 @@ export default function FeesPage() {
       supabase.from('school_classes').select('*').eq('business_id', biz.id).order('sort_order').order('name'),
       supabase.from('school_terms').select('*, school_sessions(name)').eq('business_id', biz.id).order('created_at', { ascending: false }),
       supabase.from('fee_structures').select('*').eq('business_id', biz.id).order('sort_order'),
-      supabase.from('invoices').select('id, student_id, term_id, total, paid').not('student_id', 'is', null),
+      // invoice_payments(amount) is embedded here specifically so
+      // collectionStats below can sum real recorded payments per
+      // invoice — a partial payment on an invoice that isn't fully
+      // "paid" yet was previously invisible to that calculation
+      // entirely, not partially counted. See collectionStats' comment.
+      supabase.from('invoices').select('id, student_id, term_id, total, paid, invoice_payments(amount)').eq('business_id', biz.id).not('student_id', 'is', null),
     ]);
     setClasses(cl || []);
     setTerms(tm || []);
@@ -63,7 +68,16 @@ export default function FeesPage() {
   const collectionStats = useMemo(() => {
     const termInvoices = invoices.filter((i) => i.term_id === selectedTerm);
     const total = termInvoices.reduce((s, i) => s + Number(i.total), 0);
-    const paid = termInvoices.filter((i) => i.paid).reduce((s, i) => s + Number(i.total), 0);
+    // Sums every actual recorded payment (invoice_payments) across all
+    // of this term's invoices — correctly reflects both full and
+    // partial payments. The previous version only summed the full
+    // total of invoices already marked fully "paid," so a partial
+    // payment on an otherwise-open invoice contributed nothing at all
+    // to this number, undercounting real collections.
+    const paid = termInvoices.reduce(
+      (s, i) => s + (i.invoice_payments || []).reduce((ps, p) => ps + Number(p.amount), 0),
+      0
+    );
     return { count: termInvoices.length, total, paid, outstanding: total - paid };
   }, [invoices, selectedTerm]);
 

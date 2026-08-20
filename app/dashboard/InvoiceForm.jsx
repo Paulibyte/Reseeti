@@ -39,6 +39,7 @@ export default function InvoiceForm({ business, onClose, onSaved, resumeDraft, o
   const [whtEnabled, setWhtEnabled] = useState(resumeDraft ? resumeDraft.whtEnabled : (business.withholding_tax_enabled || false));
   const [whtRate, setWhtRate] = useState(resumeDraft?.whtRate ?? (business.default_withholding_tax_rate ?? 0));
   const [estimatedDeliveryDate, setEstimatedDeliveryDate] = useState(resumeDraft?.estimatedDeliveryDate || '');
+  const [dueDate, setDueDate] = useState(resumeDraft?.dueDate || '');
   const [saving, setSaving] = useState(false);
   const [parking, setParking] = useState(false);
   const [products, setProducts] = useState([]);
@@ -297,7 +298,7 @@ export default function InvoiceForm({ business, onClose, onSaved, resumeDraft, o
       items, discount, shippingFee,
       serviceChargeEnabled, serviceChargeRate,
       vatEnabled, vatRate, whtEnabled, whtRate,
-      estimatedDeliveryDate, loyaltyDiscountApplied,
+      estimatedDeliveryDate, loyaltyDiscountApplied, dueDate,
     }, customerMode === 'walkin' ? 'Walk-in' : customerName);
     setParking(false);
     track('sale_parked', {});
@@ -327,6 +328,7 @@ export default function InvoiceForm({ business, onClose, onSaved, resumeDraft, o
       withholding_tax_amount: withholdingTaxAmount,
       total,
       estimated_delivery_date: estimatedDeliveryDate || null,
+      due_date: dueDate || null,
       items: items.filter((it) => it.description).map((it) => ({
         description: it.description,
         qty: Number(it.qty) || 1,
@@ -666,6 +668,16 @@ export default function InvoiceForm({ business, onClose, onSaved, resumeDraft, o
         type="date"
         value={estimatedDeliveryDate}
         onChange={(e) => setEstimatedDeliveryDate(e.target.value)}
+        style={inputStyle}
+      />
+
+      <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>
+        Payment due date <span style={{ fontWeight: 400, color: 'var(--text-faint)' }}>(optional)</span>
+      </label>
+      <input
+        type="date"
+        value={dueDate}
+        onChange={(e) => setDueDate(e.target.value)}
         style={inputStyle}
       />
 

@@ -17,7 +17,7 @@ const OVERSCAN_PX = 600;
 // invoices, not to duplicate everything the receipt page shows. No
 // invoice_items join here at all (unlike the old dashboard query), since
 // nothing in this row needs line items.
-const SELECT_COLUMNS = 'id, invoice_number, customer_name, customer_phone, total, paid, last_reminded_at, created_at';
+const SELECT_COLUMNS = 'id, invoice_number, customer_name, customer_phone, total, paid, last_reminded_at, created_at, due_date';
 
 export default function VirtualInvoiceList({
   supabase,
@@ -164,6 +164,15 @@ export default function VirtualInvoiceList({
   );
 }
 
+// True only when unpaid AND the due date has genuinely passed (not
+// today — a bill due today isn't overdue yet). Kept as a small
+// standalone function rather than inline in the JSX below since it's
+// checked in two places within the row.
+function isOverdue(inv) {
+  if (inv.paid || !inv.due_date) return false;
+  return new Date(inv.due_date) < new Date(new Date().toDateString());
+}
+
 function InvoiceRow({ inv, isLast, role, overrides, reminding, onTogglePaid, onDelete, onRemind }) {
   return (
     <div
@@ -176,6 +185,14 @@ function InvoiceRow({ inv, isLast, role, overrides, reminding, onTogglePaid, onD
       <span style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--heading)' }}>{inv.invoice_number}</span>
       <span style={{ color: 'var(--text)' }}>{inv.customer_name}</span>
       <span style={{ fontWeight: 700, color: 'var(--text)' }}>{formatNaira(inv.total)}</span>
+      {isOverdue(inv) && (
+        <span
+          title={`Payment was due ${new Date(inv.due_date).toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' })}`}
+          style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--danger)', background: 'var(--danger-bg)', padding: '3px 8px', borderRadius: 10, textTransform: 'uppercase' }}
+        >
+          ⚠ Overdue
+        </span>
+      )}
       <a
         href={`/inv/${inv.id}`}
         target="_blank"
