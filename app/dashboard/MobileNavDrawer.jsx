@@ -14,9 +14,12 @@ import { NAV_ITEMS } from './navItems';
 // "Create Invoice" FAB. This renders the same nav list (same permission
 // filtering) as a full-screen slide-in drawer, opened from a hamburger
 // button in the header and closed by the backdrop, the X, or picking a link.
-export default function MobileNavDrawer({ open, onClose, plan = 'free', role, onUpgradeClick, onSignOut }) {
+export default function MobileNavDrawer({ open, onClose, plan = 'free', role, enabledModules, onUpgradeClick, onSignOut }) {
   const pathname = usePathname();
-  const navItems = NAV_ITEMS.filter((item) => !item.permission || can(role, item.permission));
+  const navItems = NAV_ITEMS.filter((item) =>
+    (!item.permission || can(role, item.permission)) &&
+    (!item.module || enabledModules?.[item.module] !== false)
+  );
 
   return (
     <>

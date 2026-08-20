@@ -33,6 +33,7 @@ export default function DashboardShell({
   // its own small slice of data than to change every page's signature.
   const [businesses, setBusinesses] = useState([]);
   const [currentBusinessId, setCurrentBusinessId] = useState(null);
+  const [enabledModules, setEnabledModules] = useState({});
 
   useEffect(() => {
     (async () => {
@@ -40,17 +41,19 @@ export default function DashboardShell({
       const { business, businesses: list } = await getMyBusiness(supabase);
       setBusinesses(list || []);
       setCurrentBusinessId(business?.id || null);
+      setEnabledModules(business?.enabled_modules || {});
     })();
   }, []);
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
-      <Sidebar plan={plan} role={role} overrides={overrides} onUpgradeClick={onUpgradeClick} onSignOut={onSignOut} />
+      <Sidebar plan={plan} role={role} enabledModules={enabledModules} overrides={overrides} onUpgradeClick={onUpgradeClick} onSignOut={onSignOut} />
       <MobileNavDrawer
         open={navOpen}
         onClose={() => setNavOpen(false)}
         plan={plan}
         role={role}
+        enabledModules={enabledModules}
         overrides={overrides}
         onUpgradeClick={onUpgradeClick}
         onSignOut={onSignOut}

@@ -8,9 +8,12 @@ import AppVersion from './AppVersion';
 import { can } from '../../lib/permissions';
 import { NAV_ITEMS } from './navItems';
 
-export default function Sidebar({ plan = 'free', role, onUpgradeClick, onSignOut }) {
+export default function Sidebar({ plan = 'free', role, enabledModules, onUpgradeClick, onSignOut }) {
   const pathname = usePathname();
-  const navItems = NAV_ITEMS.filter((item) => !item.permission || can(role, item.permission));
+  const navItems = NAV_ITEMS.filter((item) =>
+    (!item.permission || can(role, item.permission)) &&
+    (!item.module || enabledModules?.[item.module] !== false)
+  );
 
   return (
     <aside

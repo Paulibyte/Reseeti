@@ -1,0 +1,12 @@
+-- Stage 58 migration: run in the Supabase SQL editor after schema_stage57.
+--
+-- A settings toggle to hide the School/Hotel nav items for businesses
+-- that don't use them — requested after Phase 4 made the sidebar
+-- noticeably longer for everyone, whether they use these modules or
+-- not.
+--
+-- Defaults to every module VISIBLE (true) for every business — this is
+-- an opt-OUT toggle, not opt-in. Nothing about the current live
+-- behavior changes for anyone until they explicitly hide something on
+-- the new /dashboard/modules page.
+alter table businesses add column if not exists enabled_modules jsonb not null default '{"school": true, "hotel": true, "construction": true, "clinic": true, "lab": true}'::jsonb;
