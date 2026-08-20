@@ -40,6 +40,30 @@ export default function InvoiceForm({ business, onClose, onSaved, resumeDraft, o
   const [whtRate, setWhtRate] = useState(resumeDraft?.whtRate ?? (business.default_withholding_tax_rate ?? 0));
   const [estimatedDeliveryDate, setEstimatedDeliveryDate] = useState(resumeDraft?.estimatedDeliveryDate || '');
   const [dueDate, setDueDate] = useState(resumeDraft?.dueDate || '');
+  const [customFieldDefs, setCustomFieldDefs] = useState([]);
+  // Keyed by field definition id — resumeDraft carries these forward as
+  // the same self-contained {label, type, value} snapshot shape stored
+  // on the invoice itself (see schema_stage52.sql), so a parked sale's
+  // custom field values survive being resumed even if the underlying
+  // field definition changed or was deleted in the meantime; matched
+  // back to a live definition id here only when one still exists with
+  // the same label, purely so the input re-populates correctly.
+  const [customFieldValues, setCustomFieldValues] = useState(() => {
+    const snapshot = resumeDraft?.customFieldValues || [];
+    const byLabel = {};
+    for (const f of snapshot) byLabel[f.label] = f.value;
+    return byLabel;
+  });
+
+  // Builds the self-contained snapshot actually stored on the invoice —
+  // only fields with a non-empty value are included, so an invoice with
+  // no custom data ends up with a clean empty array rather than a pile
+  // of blank entries.
+  function buildCustomFieldSnapshot() {
+    return customFieldDefs
+      .map((def) => ({ label: def.label, type: def.field_type, value: customFieldValues[def.label] }))
+      .filter((f) => f.value !== undefined && f.value !== '');
+  }
   const [saving, setSaving] = useState(false);
   const [parking, setParking] = useState(false);
   const [products, setProducts] = useState([]);
@@ -56,6 +80,8 @@ export default function InvoiceForm({ business, onClose, onSaved, resumeDraft, o
       setProducts(prods || []);
       const { data: custs } = await supabase.from('customers').select('id, name, phone').eq('business_id', business.id).order('name');
       setCustomers(custs || []);
+      const { data: fieldDefs } = await supabase.from('custom_field_definitions').select('*').eq('business_id', business.id).order('sort_order');
+      setCustomFieldDefs(fieldDefs || []);
     })();
   }, [business.id]);
 
@@ -299,6 +325,7 @@ export default function InvoiceForm({ business, onClose, onSaved, resumeDraft, o
       serviceChargeEnabled, serviceChargeRate,
       vatEnabled, vatRate, whtEnabled, whtRate,
       estimatedDeliveryDate, loyaltyDiscountApplied, dueDate,
+      customFieldValues: buildCustomFieldSnapshot(),
     }, customerMode === 'walkin' ? 'Walk-in' : customerName);
     setParking(false);
     track('sale_parked', {});
@@ -329,6 +356,7 @@ export default function InvoiceForm({ business, onClose, onSaved, resumeDraft, o
       total,
       estimated_delivery_date: estimatedDeliveryDate || null,
       due_date: dueDate || null,
+      custom_field_values: buildCustomFieldSnapshot(),
       items: items.filter((it) => it.description).map((it) => ({
         description: it.description,
         qty: Number(it.qty) || 1,
@@ -680,6 +708,20 @@ export default function InvoiceForm({ business, onClose, onSaved, resumeDraft, o
         onChange={(e) => setDueDate(e.target.value)}
         style={inputStyle}
       />
+
+      {customFieldDefs.map((def) => (
+        <div key={def.id}>
+          <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>
+            {def.label} <span style={{ fontWeight: 400, color: 'var(--text-faint)' }}>(optional)</span>
+          </label>
+          <input
+            type={def.field_type === 'number' ? 'number' : def.field_type === 'date' ? 'date' : 'text'}
+            value={customFieldValues[def.label] || ''}
+            onChange={(e) => setCustomFieldValues((prev) => ({ ...prev, [def.label]: e.target.value }))}
+            style={inputStyle}
+          />
+        </div>
+      ))}
 
       <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10, marginBottom: 4 }}>
         <BreakdownRow label="Subtotal" value={subtotal} />

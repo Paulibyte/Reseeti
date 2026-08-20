@@ -9,6 +9,7 @@ import { getMyBusiness } from '../../../../lib/getMyBusiness';
 import DashboardShell from '../../DashboardShell';
 import { formatNaira } from '../../../../lib/format';
 import { queueEdit } from '../../../../lib/offlineQueue';
+import { exportCSV, exportExcel, exportPDF } from '../../../../lib/exportTable';
 
 // Code splitting: UpgradeModal only renders for free-plan businesses at
 // their invoice limit, and even then only after the person clicks
@@ -149,6 +150,62 @@ export default function CustomerDetailPage() {
     .reduce((sum, i) => sum + Math.max(0, Number(i.total) - paidSoFar(i.id)), 0);
   const lifetimeValue = invoices.reduce((sum, i) => sum + Number(i.total), 0);
 
+  // A statement of account — every invoice and every payment merged into
+  // one chronological list with a running balance, not just a purchase
+  // list. Reuses exportCSV/exportExcel/exportPDF as-is (Reports already
+  // built these against a generic {title, columns, rows, totals} shape),
+  // so no new PDF/spreadsheet rendering needed for this at all.
+  function buildStatementReport() {
+    const rows = [];
+    for (const inv of invoices) {
+      rows.push({
+        date: inv.created_at,
+        description: `Invoice ${inv.invoice_number}`,
+        charge: Number(inv.total),
+        payment: 0,
+      });
+      for (const p of paymentsFor(inv.id)) {
+        rows.push({
+          date: p.created_at,
+          description: `Payment — ${inv.invoice_number} (${p.method})`,
+          charge: 0,
+          payment: Number(p.amount),
+        });
+      }
+    }
+    rows.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    let running = 0;
+    const withBalance = rows.map((r) => {
+      running += r.charge - r.payment;
+      return {
+        date: new Date(r.date).toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' }),
+        description: r.description,
+        charge: r.charge > 0 ? formatNaira(r.charge) : '',
+        payment: r.payment > 0 ? formatNaira(r.payment) : '',
+        balance: formatNaira(running),
+      };
+    });
+
+    return {
+      title: 'Statement of Account',
+      subtitle: `${customer.name} — as of ${new Date().toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' })}`,
+      columns: [
+        { key: 'date', label: 'Date' },
+        { key: 'description', label: 'Description' },
+        { key: 'charge', label: 'Charge', align: 'right' },
+        { key: 'payment', label: 'Payment', align: 'right' },
+        { key: 'balance', label: 'Balance', align: 'right' },
+      ],
+      rows: withBalance,
+      totals: { description: 'Current balance', balance: formatNaira(running) },
+    };
+  }
+
+  function statementFilename() {
+    return `${(business.name || 'Reseeti').replace(/\s+/g, '_')}-statement-${(customer.name || 'customer').replace(/\s+/g, '_')}`;
+  }
+
   return (
     <DashboardShell plan={business.plan} onSignOut={signOut} onUpgradeClick={() => setShowUpgrade(true)}>
       <Link href="/dashboard/customers" style={{ fontSize: 13, color: 'var(--text-muted)', textDecoration: 'none', display: 'inline-block', marginBottom: 14 }}>
@@ -212,7 +269,31 @@ export default function CustomerDetailPage() {
         </div>
       )}
 
-      <h3 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', fontSize: 16, marginBottom: 12 }}>Purchase history</h3>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+        <h3 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', fontSize: 16, margin: 0 }}>Purchase history</h3>
+        {invoices.length > 0 && (
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              onClick={() => exportCSV(buildStatementReport(), statementFilename())}
+              style={statementBtnStyle}
+            >
+              CSV
+            </button>
+            <button
+              onClick={() => exportExcel(buildStatementReport(), statementFilename())}
+              style={statementBtnStyle}
+            >
+              Excel
+            </button>
+            <button
+              onClick={() => exportPDF(buildStatementReport(), statementFilename(), business.name)}
+              style={{ ...statementBtnStyle, background: 'var(--orange)', color: '#fff', border: 'none' }}
+            >
+              📄 Statement (PDF)
+            </button>
+          </div>
+        )}
+      </div>
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
         {invoices.length === 0 && <p style={{ color: 'var(--text-faint)', padding: 16, margin: 0 }}>No invoices for this customer yet.</p>}
         {invoices.map((inv, idx) => {
@@ -343,6 +424,7 @@ function StatCard({ label, value, accent }) {
 }
 
 const labelStyle = { fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4, marginTop: 10 };
+const statementBtnStyle = { background: 'none', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '6px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer' };
 const inputStyle = {
   width: '100%', padding: '9px 11px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 14,
   boxSizing: 'border-box', background: 'var(--bg)', color: 'var(--text)',

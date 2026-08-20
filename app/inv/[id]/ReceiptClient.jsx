@@ -326,6 +326,19 @@ export default function ReceiptClient({ invoice, business, signature, offlineMod
             {invoice.customer_name}
           </div>
 
+          {invoice.custom_field_values && invoice.custom_field_values.length > 0 && (
+            <div style={{ fontSize: 12.5, marginBottom: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '6px 16px' }}>
+              {invoice.custom_field_values.map((f, i) => (
+                <div key={i}>
+                  <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--text-faint)', display: 'block' }}>{f.label}</span>
+                  <span style={{ color: 'var(--text)' }}>
+                    {f.type === 'date' ? new Date(f.value).toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' }) : f.value}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
           <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 14 }}>
             <thead>
               <tr>

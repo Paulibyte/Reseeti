@@ -15,6 +15,8 @@ export const NAV_ITEMS = [
   { href: '/dashboard/school/fees', label: 'Fees', icon: '💰', permission: 'manageInventory' },
   { href: '/dashboard/school/classes', label: 'Classes', icon: '🏫', permission: 'manageInventory' },
   { href: '/dashboard/school/sessions', label: 'Sessions & Terms', icon: '📅', permission: 'manageInventory' },
+  { href: '/dashboard/invoice-fields', label: 'Invoice Fields', icon: '🏷️', permission: 'manageSettings' },
+  { href: '/dashboard/recurring-invoices', label: 'Recurring Invoices', icon: '🔁', permission: 'manageSettings' },
   { href: '/dashboard/expenses', label: 'Expenses', icon: '🧾', permission: 'manageExpenses' },
   { href: '/dashboard/cashbook', label: 'Cashbook', icon: '📒', permission: 'manageCashbook' },
   { href: '/dashboard/payments', label: 'Payments', icon: '💳', permission: 'manageSubscription' },
