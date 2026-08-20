@@ -7,15 +7,17 @@ import { getMyBusiness } from '../../../lib/getMyBusiness';
 import DashboardShell from '../DashboardShell';
 import { can } from '../../../lib/permissions';
 
-// Only School and Hotel have an actual toggle here for now — this is
-// the exact list requested. Construction/Clinic/Lab are already tagged
-// with a `module` key in navItems.js and covered by
-// enabled_modules' default (schema_stage58.sql), so adding a toggle
-// for any of them later is just adding a row to this array, not
-// re-plumbing anything.
+// All five Phase 4 verticals now have a toggle here — each was already
+// tagged with a `module` key in navItems.js and covered by
+// enabled_modules' default (schema_stage58.sql) from the start, so
+// extending School/Hotel to include these three was just adding rows
+// here, not re-plumbing anything.
 const MODULES = [
   { key: 'school', label: 'School Billing', description: 'Students, Fees, Classes, Sessions & Terms' },
   { key: 'hotel', label: 'Hotel Billing', description: 'Bookings, Rooms' },
+  { key: 'construction', label: 'Construction Billing', description: 'Projects' },
+  { key: 'clinic', label: 'Clinic Billing', description: 'Visits' },
+  { key: 'lab', label: 'Laboratory Billing', description: 'Orders' },
 ];
 
 export default function ModulesPage() {

@@ -314,7 +314,7 @@ export default function ProductForm({ business, product, familyId, familyName, o
 
           <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
             <button type="submit" disabled={saving} style={{ background: 'var(--orange)', color: '#fff', border: 'none', padding: '10px 18px', borderRadius: 6, fontWeight: 700, cursor: 'pointer' }}>
-              {uploadingPhoto ? 'Uploading photo…' : saving ? 'Saving…' : isEdit ? 'Save changes' : 'Add product'}
+              {uploadingPhoto ? 'Uploading photo…' : saving ? 'Saving…' : isEdit ? 'Save changes' : form.type === 'service' ? 'Add service' : 'Add product'}
             </button>
             <button type="button" onClick={onClose} style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text)', padding: '10px 18px', borderRadius: 6, cursor: 'pointer' }}>
               Cancel
