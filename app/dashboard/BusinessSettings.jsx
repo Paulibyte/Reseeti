@@ -120,11 +120,20 @@ export default function BusinessSettings({ business, onSaved, onClose }) {
     setError('');
 
     const ext = file.name.split('.').pop();
-    const path = `${business.id}/logo.${ext}`;
+    // The filename itself now includes a unique timestamp, not just a
+    // ?t= query-string cache-buster appended to a reused path. A query
+    // string alone isn't reliable here — if Supabase's storage CDN
+    // caches by base file path and ignores query strings (a common
+    // behavior for S3-compatible storage), re-uploading to the exact
+    // same path could keep serving the old cached file indefinitely
+    // regardless of any cache-busting on the URL. A genuinely new path
+    // guarantees a real cache miss no matter how the CDN treats query
+    // strings.
+    const path = `${business.id}/logo-${Date.now()}.${ext}`;
 
     const { error: uploadError } = await supabase.storage
       .from('logos')
-      .upload(path, file, { upsert: true, cacheControl: '3600' });
+      .upload(path, file, { cacheControl: '3600' });
 
     if (uploadError) {
       setError(uploadError.message);
@@ -133,10 +142,7 @@ export default function BusinessSettings({ business, onSaved, onClose }) {
     }
 
     const { data } = supabase.storage.from('logos').getPublicUrl(path);
-    // Cache-bust so the new logo shows immediately instead of a stale
-    // browser-cached version at the same URL.
-    const freshUrl = `${data.publicUrl}?t=${Date.now()}`;
-    setLogoUrl(freshUrl);
+    setLogoUrl(data.publicUrl);
     setUploading(false);
   }
 
@@ -156,11 +162,13 @@ export default function BusinessSettings({ business, onSaved, onClose }) {
     // Reuses the same 'logos' storage bucket/policies as the business
     // logo — the RLS policy only checks the business_id folder, not the
     // filename, so this is a legitimate reuse rather than a workaround.
-    const path = `${business.id}/signature.${ext}`;
+    // Same unique-path fix as the logo upload above, and for the exact
+    // same reason — see the comment there.
+    const path = `${business.id}/signature-${Date.now()}.${ext}`;
 
     const { error: uploadError } = await supabase.storage
       .from('logos')
-      .upload(path, file, { upsert: true, cacheControl: '3600' });
+      .upload(path, file, { cacheControl: '3600' });
 
     if (uploadError) {
       setError(uploadError.message);
@@ -169,8 +177,7 @@ export default function BusinessSettings({ business, onSaved, onClose }) {
     }
 
     const { data } = supabase.storage.from('logos').getPublicUrl(path);
-    const freshUrl = `${data.publicUrl}?t=${Date.now()}`;
-    setSignatureUrl(freshUrl);
+    setSignatureUrl(data.publicUrl);
     setUploadingSignature(false);
   }
 
