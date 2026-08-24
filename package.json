@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "NODE_OPTIONS=--max-old-space-size=768 next build",
+    "build": "NODE_OPTIONS=--max-old-space-size=1536 next build",
     "start": "next start",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"
@@ -20,6 +20,7 @@
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "twilio": "^6.1.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
