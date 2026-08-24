@@ -45,6 +45,8 @@ export async function POST(request) {
     const businessId = event.data.metadata?.business_id;
     const tier = event.data.metadata?.tier;
     const customerCode = event.data.customer?.customer_code;
+    const paymentType = event.data.metadata?.payment_type;
+    const invoiceId = event.data.metadata?.invoice_id;
 
     if (businessId && tier) {
       const tierRow = await getTier(tier);
@@ -69,6 +71,28 @@ export async function POST(request) {
           metadata: { reference: event.data.reference, tier },
         });
       }
+    } else if (paymentType === 'school_fee_installment' && invoiceId) {
+      // A parent paying part of a school-fee invoice online (see
+      // app/api/school/fee-payment/route.js, which set this metadata
+      // when the transaction was initialized). Recording a plain
+      // invoice_payments row here is deliberately the ONLY thing this
+      // branch does — it's the exact same insert staff already make via
+      // "Record payment" on the customer page, so whatever logic
+      // already marks an invoice fully paid once payments cover the
+      // total keeps working unchanged; there's no separate "mark paid"
+      // step to duplicate or get out of sync.
+      await supabase.from('invoice_payments').insert({
+        invoice_id: invoiceId,
+        method: 'card',
+        amount: event.data.amount / 100,
+      });
+
+      const { data: inv } = await supabase.from('invoices').select('business_id').eq('id', invoiceId).maybeSingle();
+      await supabase.from('events').insert({
+        business_id: inv?.business_id || null,
+        event_type: 'school_fee_installment_paid',
+        metadata: { reference: event.data.reference, invoice_id: invoiceId, amount: event.data.amount / 100 },
+      });
     }
   }
 

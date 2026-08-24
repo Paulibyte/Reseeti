@@ -444,6 +444,10 @@ export default function ReceiptClient({ invoice, business, signature, offlineMod
             </div>
           )}
 
+          {!invoice.paid && invoice.student_id && business.paystack_subaccount_code && (
+            <SchoolFeePaymentBox invoice={invoice} parentEmail={invoice.customers?.email} />
+          )}
+
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 20, paddingTop: 14, borderTop: '2px dashed var(--border)' }}>
             <div style={{ fontSize: 10.5, color: 'var(--text-faint)', fontFamily: 'monospace', lineHeight: 1.6 }}>
               <div>Verify: <a href={verifyPath} style={{ color: 'var(--text-muted)', fontWeight: 700 }}>{invoice.verification_code}</a></div>
@@ -559,5 +563,76 @@ export default function ReceiptClient({ invoice, business, signature, offlineMod
         </div>
       )}
     </main>
+  );
+}
+
+// Lets a parent pay part of a school-fee invoice online, no login or
+// staff involvement needed. Every meaningful number (remaining
+// balance, the ₦1,000 minimum) is re-validated server-side in
+// app/api/school/fee-payment/route.js — this component only ever
+// proposes an amount, it never enforces anything on its own.
+function SchoolFeePaymentBox({ invoice, parentEmail }) {
+  const paidSoFar = (invoice.invoice_payments || []).reduce((sum, p) => sum + Number(p.amount), 0);
+  const remaining = Number(invoice.total) - paidSoFar;
+  const [amount, setAmount] = useState(String(remaining));
+  const [email, setEmail] = useState(parentEmail || '');
+  const [paying, setPaying] = useState(false);
+  const [error, setError] = useState('');
+
+  if (remaining <= 0) return null;
+
+  async function payNow() {
+    setError('');
+    if (!email.trim()) { setError('Enter an email address to receive your payment receipt.'); return; }
+    setPaying(true);
+    try {
+      const res = await fetch('/api/school/fee-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invoiceId: invoice.id, amount: Number(amount), email: email.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error || 'Could not start payment.'); setPaying(false); return; }
+      window.location.href = data.authorization_url;
+    } catch {
+      setError('Could not start payment — check your connection and try again.');
+      setPaying(false);
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 18, padding: '14px 16px', background: 'var(--success-bg)', border: '1px solid var(--success)', borderRadius: 8 }} data-html2canvas-ignore="true">
+      <p style={{ margin: '0 0 8px', fontWeight: 700, fontSize: 12.5, color: 'var(--success)', textTransform: 'uppercase', letterSpacing: 0.3 }}>
+        Pay towards this fee online
+      </p>
+      <p style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--text-muted)' }}>
+        Remaining balance: <strong>{formatNaira(remaining)}</strong>. Pay all of it now, or any amount of at least ₦1,000.
+      </p>
+      <input
+        type="email"
+        placeholder="Your email (for the payment receipt)"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        style={{ width: '100%', padding: '9px 11px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 14, marginBottom: 8, boxSizing: 'border-box' }}
+      />
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input
+          type="number"
+          min="1000"
+          max={remaining}
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          style={{ flex: 1, padding: '9px 11px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 14 }}
+        />
+        <button
+          onClick={payNow}
+          disabled={paying}
+          style={{ background: 'var(--success)', color: '#fff', border: 'none', borderRadius: 6, padding: '9px 16px', fontWeight: 700, cursor: 'pointer' }}
+        >
+          {paying ? 'Starting…' : 'Pay Now'}
+        </button>
+      </div>
+      {error && <p style={{ color: 'var(--danger)', fontSize: 12, margin: '8px 0 0' }}>{error}</p>}
+    </div>
   );
 }

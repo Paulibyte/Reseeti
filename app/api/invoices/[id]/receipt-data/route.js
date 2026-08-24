@@ -16,7 +16,7 @@ export async function GET(request, { params }) {
 
   const { data: invoice } = await supabase
     .from('invoices')
-    .select('id, invoice_number, customer_id, customer_name, customer_phone, subtotal, discount, loyalty_discount_applied, loyalty_discount_amount, service_charge_rate, service_charge_amount, vat_rate, vat_amount, shipping_fee, withholding_tax_rate, withholding_tax_amount, total, paid, payment_method, verification_code, estimated_delivery_date, due_date, custom_field_values, customer_signature_data, created_at, business_id, invoice_items(id, description, qty, price, sort_order), invoice_payments(method, amount), customers(email)')
+    .select('id, invoice_number, customer_id, customer_name, customer_phone, subtotal, discount, loyalty_discount_applied, loyalty_discount_amount, service_charge_rate, service_charge_amount, vat_rate, vat_amount, shipping_fee, withholding_tax_rate, withholding_tax_amount, total, paid, payment_method, verification_code, estimated_delivery_date, due_date, custom_field_values, customer_signature_data, created_at, business_id, student_id, invoice_items(id, description, qty, price, sort_order), invoice_payments(method, amount), customers(email)')
     .eq('id', params.id)
     .order('sort_order', { foreignTable: 'invoice_items' })
     .single();
@@ -27,7 +27,7 @@ export async function GET(request, { params }) {
 
   const { data: business } = await supabase
     .from('businesses')
-    .select('name, phone, address, logo_url, signature_url, bank_name, bank_account_name, bank_account_number, terms_and_conditions')
+    .select('name, phone, address, logo_url, signature_url, bank_name, bank_account_name, bank_account_number, terms_and_conditions, paystack_subaccount_code')
     .eq('id', invoice.business_id)
     .single();
 
