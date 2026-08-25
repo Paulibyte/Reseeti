@@ -11,6 +11,17 @@ import { computeReceiptSignature } from '../../../../../lib/receiptSignature';
 // used here, server-side, exactly as before, just returned as a
 // pre-computed value in the JSON response instead of being embedded
 // during SSR.
+//
+// force-dynamic is essential here, not optional — Next.js wraps
+// fetch() (what supabase-js uses internally) with its own indefinite
+// caching by default unless a route explicitly opts out. Without this,
+// the first-ever request for a given business/invoice can get cached
+// and keep being served forever afterward, completely invisible to
+// direct database checks, rebuilds, or anything short of this exact
+// declaration — this was the real cause of the missing
+// paystack_subaccount_code/bank_account_number values.
+export const dynamic = 'force-dynamic';
+
 export async function GET(request, { params }) {
   const supabase = createAdminClient();
 
