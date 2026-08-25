@@ -47,6 +47,7 @@ export default function Dashboard() {
   const supabase = createClient();
   const router = useRouter();
   const [business, setBusiness] = useState(null);
+  const [offlineMode, setOfflineMode] = useState(false);
   const [role, setRole] = useState(null);
   const [overrides, setOverrides] = useState({});
   const [invoices, setInvoices] = useState([]);
@@ -187,13 +188,14 @@ export default function Dashboard() {
   }
 
   async function load() {
-    const { user, business: biz, role: myRole, overrides: myOverrides } = await getMyBusiness(supabase);
+    const { user, business: biz, role: myRole, overrides: myOverrides, fromCache } = await getMyBusiness(supabase);
     if (!user) { router.push('/login'); return; }
     if (!biz) { setLoading(false); return; }
 
     setBusiness(biz);
     setRole(myRole);
     setOverrides(myOverrides || {});
+    setOfflineMode(fromCache);
     refreshPendingOrdersCount(biz.id);
 
     // Paint from the last cached snapshot immediately (IndexedDB read is
@@ -206,6 +208,18 @@ export default function Dashboard() {
     if (cached.length) {
       setInvoices(cached);
       setLoading(false);
+    }
+
+    // If the business/membership check itself just had to fall back to
+    // a cached snapshot (see lib/getMyBusiness.js), the same lack of
+    // real connectivity almost certainly blocks every query below too —
+    // skip straight to "this is a cold, offline open; cached invoices
+    // are all there is right now" instead of letting each of the
+    // following network calls hang for its own timeout, one after
+    // another, before the page becomes usable.
+    if (fromCache) {
+      setLoading(false);
+      return;
     }
 
     // Only the columns the stat cards / notifications on this page
@@ -357,6 +371,11 @@ export default function Dashboard() {
       onSignOut={signOut}
       notifications={notifications}
     >
+      {offlineMode && (
+        <div style={{ background: 'var(--orange-bg)', color: 'var(--orange-dark)', textAlign: 'center', padding: '8px 12px', fontSize: 12.5, fontWeight: 600, borderRadius: 8, marginBottom: 14 }}>
+          You're offline — showing the last data saved on this device. Invoices you create now will sync once you're back online.
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
         {business.logo_url && (
           <Image

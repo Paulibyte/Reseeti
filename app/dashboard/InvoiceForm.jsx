@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { createClient } from '../../lib/supabaseClient';
 import { queueDraftInvoice, syncQueue, getQueue } from '../../lib/offlineQueue';
+import { cacheGetAll, cacheSetAll, withTimeout } from '../../lib/idbCache';
 import { parkSale } from '../../lib/parkedSales';
 import { track } from '../../lib/analytics';
 import { formatNaira, formatRate } from '../../lib/format';
@@ -75,13 +76,45 @@ export default function InvoiceForm({ business, onClose, onSaved, resumeDraft, o
     // Loaded once so item rows can offer inventory picks (native
     // <datalist>, degrades gracefully to plain typing if empty/offline)
     // and the customer dropdown can list existing profiles.
+    //
+    // Run in parallel (Promise.allSettled) rather than sequential
+    // awaits, each raced against a timeout — a plain sequence of awaits
+    // means one hung request (a device connected to a network with no
+    // real internet, rather than a clean, fast offline failure) blocks
+    // every fetch after it from even starting. Each one that fails or
+    // times out falls back to whatever was cached from the last
+    // successful load, so an invoice can still be created from a cold,
+    // fully offline app open using whatever products/customers were
+    // last synced — not just an empty form. Custom field definitions
+    // have no dedicated offline cache: a genuinely optional part of the
+    // form, so a timeout there just means no custom fields show, rather
+    // than something worth caching for.
     (async () => {
-      const { data: prods } = await supabase.from('products').select('id, name, price, barcode, stock_qty, type').eq('business_id', business.id);
-      setProducts(prods || []);
-      const { data: custs } = await supabase.from('customers').select('id, name, phone').eq('business_id', business.id).order('name');
-      setCustomers(custs || []);
-      const { data: fieldDefs } = await supabase.from('custom_field_definitions').select('*').eq('business_id', business.id).order('sort_order');
-      setCustomFieldDefs(fieldDefs || []);
+      const [prodsResult, custsResult, fieldDefsResult] = await Promise.allSettled([
+        withTimeout(supabase.from('products').select('id, name, price, barcode, stock_qty, type').eq('business_id', business.id), 4000),
+        withTimeout(supabase.from('customers').select('id, name, phone').eq('business_id', business.id).order('name'), 4000),
+        withTimeout(supabase.from('custom_field_definitions').select('*').eq('business_id', business.id).order('sort_order'), 4000),
+      ]);
+
+      if (prodsResult.status === 'fulfilled') {
+        const prods = prodsResult.value.data || [];
+        setProducts(prods);
+        cacheSetAll('products', business.id, prods);
+      } else {
+        setProducts(await cacheGetAll('products', business.id));
+      }
+
+      if (custsResult.status === 'fulfilled') {
+        const custs = custsResult.value.data || [];
+        setCustomers(custs);
+        cacheSetAll('customers', business.id, custs);
+      } else {
+        setCustomers(await cacheGetAll('customers', business.id));
+      }
+
+      if (fieldDefsResult.status === 'fulfilled') {
+        setCustomFieldDefs(fieldDefsResult.value.data || []);
+      }
     })();
   }, [business.id]);
 
