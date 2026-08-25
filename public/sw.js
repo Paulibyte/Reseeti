@@ -4,11 +4,26 @@
 // runtime cache-as-you-go strategy avoids that maintenance problem
 // entirely at the cost of the very first visit needing a connection.
 
-// Bumped for Stage 21 — see the RSC-request skip below. A v3 cache may
-// already hold a poisoned entry (an RSC flight response sitting where a
-// page's real HTML should be), so this bump forces those to be thrown
-// away on activate rather than living on for existing installs.
-const CACHE_NAME = 'reseeti-shell-v4';
+// Bumped again — this version adds proactive precaching of the app
+// shell itself (see the install handler below), on top of Stage 21's
+// RSC-request fix.
+const CACHE_NAME = 'reseeti-shell-v5';
+
+// The exact URL an installed PWA launches into (manifest.json's
+// start_url) plus /login, precached the moment this service worker
+// installs — not left to "cache as you go" from normal browsing.
+// Without this, a person who always reaches /dashboard through an
+// in-app client-side redirect (e.g. straight after signing in) rather
+// than a genuine full page load could have NO cached copy of the real
+// dashboard HTML at all, even after using the app successfully many
+// times — the RSC-skip fix above is correct (an in-app navigation's
+// response is the wrong thing to cache at this URL), but on its own it
+// never guarantees a GOOD entry gets cached either. A cold, offline
+// launch from the home-screen icon is a genuine top-level navigation,
+// with nothing to fall back to if this never ran — which is exactly
+// what showed up as the browser's own "site can't be reached" page
+// instead of the app's offline view.
+const PRECACHE_URLS = ['/dashboard', '/login'];
 
 // Runtime cache is capped at this many entries. Without a limit, a
 // business that browses a lot of invoices/receipts over months would
@@ -25,6 +40,29 @@ self.addEventListener('install', (event) => {
   // via lib/pwa.js's applyUpdate()) before it takes over. Auto-activating
   // mid-session used to mean the app could silently switch to new code
   // while someone was partway through creating an invoice.
+  //
+  // The precache below runs regardless of that waiting behavior — it
+  // just populates this worker's own cache in the background while it
+  // waits, so the moment it does take over (on the person's next
+  // deliberate update), a good /dashboard entry is already sitting
+  // there. Each URL is fetched and cached independently (not
+  // cache.addAll, which fails the whole batch if any single request
+  // fails) — losing /login shouldn't cost /dashboard, or vice versa —
+  // and the whole thing is best-effort: if precaching fails entirely
+  // (e.g. installed while genuinely offline for the first time), the
+  // worker still installs normally and falls back to the existing
+  // cache-as-you-go behavior, exactly as before this existed.
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) =>
+      Promise.all(
+        PRECACHE_URLS.map((url) =>
+          fetch(url)
+            .then((res) => { if (res.ok) return cache.put(url, res); })
+            .catch(() => {})
+        )
+      )
+    )
+  );
 });
 
 self.addEventListener('activate', (event) => {
