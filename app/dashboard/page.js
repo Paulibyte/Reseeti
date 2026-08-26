@@ -15,6 +15,7 @@ import { useRealtimeSync } from '../../lib/useRealtimeSync';
 import { getQueue, syncQueue, pendingCount, onBackgroundSyncMessage, getEditConflicts } from '../../lib/offlineQueue';
 import { listParkedSales } from '../../lib/parkedSales';
 import { cacheGetAll, cacheSetAll } from '../../lib/idbCache';
+import { warmReceiptCache } from '../../lib/receiptCache';
 import { track } from '../../lib/analytics';
 import { formatNaira } from '../../lib/format';
 import { can } from '../../lib/permissions';
@@ -236,6 +237,14 @@ export default function Dashboard() {
       .order('created_at', { ascending: false });
     setInvoices(invs || []);
     cacheSetAll('invoices', biz.id, invs || []);
+
+    // Keeps the 50 most recently created invoices individually openable
+    // offline too, not just visible by name in this list — see
+    // lib/receiptCache.js's warmReceiptCache for the full reasoning.
+    // Never awaited: this runs in the background and must never slow
+    // down this page's own load, even on a slow connection or a
+    // business with a large invoice history.
+    warmReceiptCache((invs || []).slice(0, 50).map((i) => i.id)).catch(() => {});
 
     const { data: allProducts } = await supabase
       .from('products')
