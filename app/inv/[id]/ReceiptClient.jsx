@@ -5,6 +5,17 @@ import { useEffect, useRef, useState } from 'react';
 import { formatNaira, formatRate } from '../../../lib/format';
 import { renderElementToPDFBlob, blobToBase64 } from '../../../lib/generateInvoicePDF';
 import PrintReceiptButton from '../../components/PrintReceiptButton';
+// QRCode/JsBarcode moved to static imports for the same reason
+// generateInvoicePDF.js's html2canvas/jsPDF were — a dynamic import()
+// fetches its target as a separate JS chunk on first use, and if that
+// exact chunk was never fetched while online on a given device (easy to
+// hit right after any rebuild, since these chunk filenames change every
+// build), there's nothing cached to serve it offline. A static import
+// bundles both into the same code this page already needs just to
+// render, so if the receipt can load offline at all, the QR code and
+// barcode can too.
+import QRCode from 'qrcode';
+import JsBarcode from 'jsbarcode';
 
 const PAYMENT_METHOD_LABELS = {
   cash: 'Cash',
@@ -127,7 +138,6 @@ export default function ReceiptClient({ invoice, business, signature, offlineMod
   useEffect(() => {
     if (!shareUrl) return;
     (async () => {
-      const QRCode = (await import('qrcode')).default;
       const dataUrl = await QRCode.toDataURL(shareUrl, { margin: 1, width: 130, color: { dark: '#1E3A5F', light: '#00000000' } });
       setQrDataUrl(dataUrl);
     })();
@@ -140,7 +150,6 @@ export default function ReceiptClient({ invoice, business, signature, offlineMod
   useEffect(() => {
     if (invoice.paid || !hasBankDetails) return;
     (async () => {
-      const QRCode = (await import('qrcode')).default;
       const payload = `Bank Transfer\nBank: ${business.bank_name}\nAccount Name: ${business.bank_account_name}\nAccount Number: ${business.bank_account_number}\nAmount: NGN ${Number(invoice.total).toLocaleString()}\nReference: ${invoice.invoice_number}`;
       const dataUrl = await QRCode.toDataURL(payload, { margin: 1, width: 110, color: { dark: '#1E3A5F', light: '#00000000' } });
       setBankQrDataUrl(dataUrl);
@@ -152,7 +161,6 @@ export default function ReceiptClient({ invoice, business, signature, offlineMod
   // anything in-app.
   useEffect(() => {
     (async () => {
-      const JsBarcode = (await import('jsbarcode')).default;
       if (barcodeCanvasRef.current) {
         JsBarcode(barcodeCanvasRef.current, invoice.invoice_number, {
           format: 'CODE128', width: 1.3, height: 34, displayValue: false,
