@@ -274,7 +274,16 @@ export default function Dashboard() {
       setMarkingPaidInvoice(inv);
       return;
     }
-    // Un-marking paid is a plain, immediate toggle — no method to ask for.
+    // Un-marking paid also asks for confirmation now — this used to be
+    // a single, silent click with no warning at all, which is exactly
+    // how an invoice that had genuinely just been marked paid could
+    // look like it "reverted on its own": a stray click on the same
+    // now-green PAID badge (while checking on something else entirely)
+    // instantly undid it, with nothing on screen to suggest that's what
+    // just happened. Marking paid already requires deliberately
+    // confirming a whole modal — un-marking deserved the same basic
+    // level of intentional confirmation, not less.
+    if (!confirm(`Mark invoice ${inv.invoice_number} as unpaid again? This does not delete the payment record already saved for it.`)) return;
     const { error } = await supabase
       .from('invoices')
       .update({ paid: false, paid_at: null })
