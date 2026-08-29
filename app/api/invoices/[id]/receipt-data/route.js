@@ -50,5 +50,20 @@ export async function GET(request, { params }) {
     createdAt: invoice.created_at,
   });
 
-  return NextResponse.json({ invoice, business, signature });
+  // Explicit, belt-and-suspenders no-cache headers on the RESPONSE
+  // itself — force-dynamic above stops Next.js's own server-side
+  // caching of this route, but says nothing about the browser's own,
+  // separate HTTP cache for a given fetch() call. Without this, a
+  // caller like warmReceiptCache (which proactively fetches this exact
+  // URL right after an invoice is created, for offline priming) could
+  // have its response cached by the browser — and a genuinely fresh
+  // page view moments later, fetching the identical URL, could then be
+  // silently served that same stale, pre-payment snapshot straight from
+  // the browser's cache, without ever touching the network again. This
+  // header removes any ambiguity: no cache, anywhere, ever, for this
+  // response.
+  return NextResponse.json(
+    { invoice, business, signature },
+    { headers: { 'Cache-Control': 'no-store, must-revalidate' } }
+  );
 }
