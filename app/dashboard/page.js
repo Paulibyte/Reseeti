@@ -275,10 +275,14 @@ export default function Dashboard() {
       return;
     }
     // Un-marking paid is a plain, immediate toggle — no method to ask for.
-    await supabase
+    const { error } = await supabase
       .from('invoices')
       .update({ paid: false, paid_at: null })
       .eq('id', inv.id);
+    if (error) {
+      alert(`Could not update this invoice: ${error.message}`);
+      return;
+    }
     load();
     setInvoiceRefreshToken((t) => t + 1);
   }
@@ -302,14 +306,39 @@ export default function Dashboard() {
     // breakdown lives in invoice_payments either way.
     const summaryMethod = payments.length === 1 ? payments[0].method : 'split';
 
-    await supabase
+    // .select() is added here specifically so a failed match (wrong or
+    // stale id, an RLS policy silently blocking the write) is
+    // detectable — without it, .update() returns no error at all for a
+    // WHERE clause that matches zero rows, and this function would
+    // proceed exactly as if it had succeeded: closing the modal,
+    // reloading the list, with nothing anywhere telling you the write
+    // never actually happened.
+    const { data: updated, error: updateError } = await supabase
       .from('invoices')
       .update({ paid: true, paid_at: new Date().toISOString(), payment_method: summaryMethod })
-      .eq('id', markingPaidInvoice.id);
+      .eq('id', markingPaidInvoice.id)
+      .select('id');
 
-    await supabase.from('invoice_payments').insert(
+    if (updateError) {
+      alert(`Could not mark this invoice paid: ${updateError.message}`);
+      return;
+    }
+    if (!updated || updated.length === 0) {
+      alert('Could not mark this invoice paid — it may have been deleted, or you may not have permission. Try refreshing the list.');
+      return;
+    }
+
+    const { error: paymentsError } = await supabase.from('invoice_payments').insert(
       payments.map((p) => ({ invoice_id: markingPaidInvoice.id, method: p.method, amount: p.amount }))
     );
+    if (paymentsError) {
+      // The invoice itself is genuinely marked paid at this point (the
+      // update above already succeeded) — only the itemized payment
+      // breakdown failed to save. Surfacing this clearly rather than
+      // silently swallowing it, since the amounts/methods matter for
+      // reporting even though the paid status itself is correct.
+      alert(`Marked paid, but couldn't save the payment breakdown: ${paymentsError.message}`);
+    }
 
     track('invoice_marked_paid', { payment_method: summaryMethod, split: payments.length > 1 });
     setMarkingPaidInvoice(null);
