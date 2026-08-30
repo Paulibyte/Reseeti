@@ -22,6 +22,22 @@ import { computeReceiptSignature } from '../../../../../lib/receiptSignature';
 // paystack_subaccount_code/bank_account_number values.
 export const dynamic = 'force-dynamic';
 
+// A second, separate setting from the one above — dynamic controls
+// whether Next.js treats this ROUTE itself as static or dynamic;
+// fetchCache controls whether INDIVIDUAL fetch() calls made from
+// WITHIN this route get cached, independently of that. supabase-js
+// makes its own internal fetch() calls to Supabase's servers, and
+// those calls are still subject to Next.js's default fetch-caching
+// behavior unless this is also set explicitly — dynamic alone doesn't
+// guarantee it. This was confirmed to be the actual, final missing
+// piece: a direct curl request to Supabase's REST API (bypassing
+// Next.js's fetch-patching entirely) was correct on every single test,
+// while this route, going through the exact same query via
+// supabase-js, could still occasionally return stale data even after
+// force-dynamic and explicit no-store response headers were both
+// already in place.
+export const fetchCache = 'force-no-store';
+
 const INVOICE_SELECT = 'id, invoice_number, customer_id, customer_name, customer_phone, subtotal, discount, loyalty_discount_applied, loyalty_discount_amount, service_charge_rate, service_charge_amount, vat_rate, vat_amount, shipping_fee, withholding_tax_rate, withholding_tax_amount, total, paid, payment_method, verification_code, estimated_delivery_date, due_date, custom_field_values, customer_signature_data, created_at, business_id, student_id, invoice_items(id, description, qty, price, sort_order), invoice_payments(method, amount), customers(email)';
 
 // A short, deliberately narrow safety net for a real, confirmed
