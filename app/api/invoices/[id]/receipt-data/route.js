@@ -31,21 +31,26 @@ const INVOICE_SELECT = 'id, invoice_number, customer_id, customer_name, customer
 // UPDATE on this table, no queued-edit mechanism ever targets invoices,
 // and browser/Next.js caching were both confirmed absent in the exact
 // case that still failed). What was actually observed: a read
-// happening milliseconds after its own write occasionally returned a
+// happening shortly after its own write occasionally returned a
 // snapshot from just before that write — reproducible via a direct
 // server-to-server request that bypasses every cache this app
 // controls. A manual re-check moments later always showed the correct,
 // settled data.
 //
-// This only retries when BOTH: the invoice looks unpaid with no
-// recorded payments, AND it was created within the last minute — the
-// only situation where "this might be a lagged read of a very recent
-// write" is actually plausible. An invoice that's genuinely, simply
-// never been paid (the overwhelming majority of "unpaid, no payments"
-// reads at any given moment) skips this entirely and responds exactly
-// as fast as before; only a narrow slice of very-fresh invoices pay a
-// short, one-time delay to protect against this specific, confirmed
-// timing issue.
+// Retries up to 3 times total, with increasing delays (500ms, 1s, 2s —
+// up to 3.5s of added latency in the worst case) rather than a single
+// fixed wait — a single short retry wasn't reliably enough in practice,
+// meaning the underlying lag can apparently last longer than a single
+// guessed delay accounts for. Only ever applies when the invoice looks
+// unpaid with no recorded payments AND was created within the last 5
+// minutes — the only situation where "this might be a lagged read of a
+// recent write" is plausible at all. A genuinely, simply unpaid
+// invoice (the overwhelming majority of "unpaid, no payments" reads at
+// any given moment) never enters this path and responds exactly as
+// fast as before.
+const RETRY_DELAYS_MS = [500, 1000, 2000];
+const RECENT_WINDOW_MS = 5 * 60_000;
+
 async function fetchInvoice(supabase, id) {
   return supabase.from('invoices').select(INVOICE_SELECT).eq('id', id)
     .order('sort_order', { foreignTable: 'invoice_items' }).single();
@@ -53,7 +58,7 @@ async function fetchInvoice(supabase, id) {
 
 function looksPossiblyLagged(invoice) {
   const ageMs = Date.now() - new Date(invoice.created_at).getTime();
-  return !invoice.paid && (invoice.invoice_payments || []).length === 0 && ageMs < 60_000;
+  return !invoice.paid && (invoice.invoice_payments || []).length === 0 && ageMs < RECENT_WINDOW_MS;
 }
 
 export async function GET(request, { params }) {
@@ -65,8 +70,9 @@ export async function GET(request, { params }) {
     return NextResponse.json({ error: 'not_found' }, { status: 404 });
   }
 
-  if (looksPossiblyLagged(invoice)) {
-    await new Promise((resolve) => setTimeout(resolve, 400));
+  for (const delayMs of RETRY_DELAYS_MS) {
+    if (!looksPossiblyLagged(invoice)) break;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
     const { data: rechecked } = await fetchInvoice(supabase, params.id);
     if (rechecked) invoice = rechecked;
   }
