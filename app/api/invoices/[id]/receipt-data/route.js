@@ -22,18 +22,53 @@ import { computeReceiptSignature } from '../../../../../lib/receiptSignature';
 // paystack_subaccount_code/bank_account_number values.
 export const dynamic = 'force-dynamic';
 
+const INVOICE_SELECT = 'id, invoice_number, customer_id, customer_name, customer_phone, subtotal, discount, loyalty_discount_applied, loyalty_discount_amount, service_charge_rate, service_charge_amount, vat_rate, vat_amount, shipping_fee, withholding_tax_rate, withholding_tax_amount, total, paid, payment_method, verification_code, estimated_delivery_date, due_date, custom_field_values, customer_signature_data, created_at, business_id, student_id, invoice_items(id, description, qty, price, sort_order), invoice_payments(method, amount), customers(email)';
+
+// A short, deliberately narrow safety net for a real, confirmed
+// inconsistency at the Supabase/database layer itself — not something
+// this app's own code caused (every application-level cause was
+// individually ruled out with direct evidence: no trigger touches
+// UPDATE on this table, no queued-edit mechanism ever targets invoices,
+// and browser/Next.js caching were both confirmed absent in the exact
+// case that still failed). What was actually observed: a read
+// happening milliseconds after its own write occasionally returned a
+// snapshot from just before that write — reproducible via a direct
+// server-to-server request that bypasses every cache this app
+// controls. A manual re-check moments later always showed the correct,
+// settled data.
+//
+// This only retries when BOTH: the invoice looks unpaid with no
+// recorded payments, AND it was created within the last minute — the
+// only situation where "this might be a lagged read of a very recent
+// write" is actually plausible. An invoice that's genuinely, simply
+// never been paid (the overwhelming majority of "unpaid, no payments"
+// reads at any given moment) skips this entirely and responds exactly
+// as fast as before; only a narrow slice of very-fresh invoices pay a
+// short, one-time delay to protect against this specific, confirmed
+// timing issue.
+async function fetchInvoice(supabase, id) {
+  return supabase.from('invoices').select(INVOICE_SELECT).eq('id', id)
+    .order('sort_order', { foreignTable: 'invoice_items' }).single();
+}
+
+function looksPossiblyLagged(invoice) {
+  const ageMs = Date.now() - new Date(invoice.created_at).getTime();
+  return !invoice.paid && (invoice.invoice_payments || []).length === 0 && ageMs < 60_000;
+}
+
 export async function GET(request, { params }) {
   const supabase = createAdminClient();
 
-  const { data: invoice } = await supabase
-    .from('invoices')
-    .select('id, invoice_number, customer_id, customer_name, customer_phone, subtotal, discount, loyalty_discount_applied, loyalty_discount_amount, service_charge_rate, service_charge_amount, vat_rate, vat_amount, shipping_fee, withholding_tax_rate, withholding_tax_amount, total, paid, payment_method, verification_code, estimated_delivery_date, due_date, custom_field_values, customer_signature_data, created_at, business_id, student_id, invoice_items(id, description, qty, price, sort_order), invoice_payments(method, amount), customers(email)')
-    .eq('id', params.id)
-    .order('sort_order', { foreignTable: 'invoice_items' })
-    .single();
+  let { data: invoice } = await fetchInvoice(supabase, params.id);
 
   if (!invoice) {
     return NextResponse.json({ error: 'not_found' }, { status: 404 });
+  }
+
+  if (looksPossiblyLagged(invoice)) {
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const { data: rechecked } = await fetchInvoice(supabase, params.id);
+    if (rechecked) invoice = rechecked;
   }
 
   const { data: business } = await supabase
