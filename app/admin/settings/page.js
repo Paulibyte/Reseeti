@@ -1,11 +1,16 @@
 import { createAdminClient } from '../../../lib/supabaseAdmin';
 import SettingsForm from './SettingsForm';
+import AnnouncementsManager from './AnnouncementsManager';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AdminSettingsPage() {
   const supabase = createAdminClient();
   const { data: settings } = await supabase.from('platform_settings').select('*').single();
+  const { data: announcements } = await supabase
+    .from('platform_announcements')
+    .select('*')
+    .order('created_at', { ascending: false });
 
   return (
     <div>
@@ -16,6 +21,7 @@ export default async function AdminSettingsPage() {
         Platform-wide defaults. Individual businesses can still be overridden from their own page under Businesses.
       </p>
       <SettingsForm settings={settings} />
+      <AnnouncementsManager announcements={announcements || []} />
     </div>
   );
 }

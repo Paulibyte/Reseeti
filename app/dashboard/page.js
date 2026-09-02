@@ -11,6 +11,7 @@ import VirtualInvoiceList from './VirtualInvoiceList';
 import AiInsights from './AiInsights';
 import OnboardingChecklist from './OnboardingChecklist';
 import OfflineDraftReceipt from './OfflineDraftReceipt';
+import AnnouncementBanner from './AnnouncementBanner';
 import { useRealtimeSync } from '../../lib/useRealtimeSync';
 import { getQueue, syncQueue, pendingCount, onBackgroundSyncMessage, getEditConflicts } from '../../lib/offlineQueue';
 import { listParkedSales } from '../../lib/parkedSales';
@@ -423,6 +424,7 @@ export default function Dashboard() {
           You're offline — showing the last data saved on this device. Invoices you create now will sync once you're back online.
         </div>
       )}
+      <AnnouncementBanner />
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
         {business.logo_url && (
           <Image
