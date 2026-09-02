@@ -1,7 +1,7 @@
 'use client';
 
-import { useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRef, useState, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '../../lib/supabaseClient';
 import Logo from '../components/Logo';
@@ -58,7 +58,12 @@ function readableError(err) {
 // database/RLS layer, which is real additional work, not done here.
 // ---------------------------------------------------------------------
 
-export default function LoginPage() {
+// useSearchParams() (used below to capture ?ref= for the referral
+// program — see schema_referrals.sql) requires a Suspense boundary in
+// the App Router, or this page can't be statically prerendered
+// correctly. The actual form logic is unchanged; it's just wrapped one
+// level deeper now so the default export satisfies that requirement.
+function LoginPage() {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [loginMode, setLoginMode] = useState('password'); // 'password' | 'otp' — which form shows on the 'phone' stage
@@ -77,6 +82,11 @@ export default function LoginPage() {
   const [mfaChallengeId, setMfaChallengeId] = useState(null);
   const [mfaCode, setMfaCode] = useState('');
   const router = useRouter();
+  // Captured once on mount — a referral link (reseeti.com/login?ref=<business_id>)
+  // only ever matters for the very first OTP request of this visit, and
+  // shouldn't change if the URL is otherwise manipulated mid-flow.
+  const searchParams = useSearchParams();
+  const referredBy = searchParams.get('ref');
   const supabase = createClient();
   const otpRefs = useRef([]);
 
@@ -132,7 +142,16 @@ export default function LoginPage() {
     setFlowContext(ctx);
     setError('');
     setLoading(true);
-    const { error: err } = await supabase.auth.signInWithOtp({ phone: fullPhone });
+    const { error: err } = await supabase.auth.signInWithOtp({
+      phone: fullPhone,
+      // Only ever read by the handle_new_user trigger for a genuinely
+      // new signup (see schema_referrals.sql) — harmless and unused for
+      // an existing user logging back in. referredBy is untrusted user
+      // input (a URL query param), so it's passed through as plain
+      // metadata rather than trusted/validated here; the trigger itself
+      // safely discards anything that isn't a real business id.
+      options: referredBy ? { data: { referred_by: referredBy } } : undefined,
+    });
     setLoading(false);
     if (err) { setError(readableError(err)); return; }
     setStage('otp');
@@ -577,3 +596,11 @@ const resendLink = {
   cursor: 'pointer',
   padding: 0,
 };
+
+export default function LoginPageWrapper() {
+  return (
+    <Suspense fallback={null}>
+      <LoginPage />
+    </Suspense>
+  );
+}

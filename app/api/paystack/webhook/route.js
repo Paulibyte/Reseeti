@@ -47,6 +47,7 @@ export async function POST(request) {
     const customerCode = event.data.customer?.customer_code;
     const paymentType = event.data.metadata?.payment_type;
     const invoiceId = event.data.metadata?.invoice_id;
+    const discountApplied = event.data.metadata?.discount_applied === true;
 
     if (businessId && tier) {
       const tierRow = await getTier(tier);
@@ -70,6 +71,56 @@ export async function POST(request) {
           event_type: 'upgrade_completed',
           metadata: { reference: event.data.reference, tier },
         });
+
+        // Referral discount actually being spent — only decrement now
+        // that the discounted payment has genuinely gone through, not
+        // at initialize time when the person may never complete
+        // checkout at all. Read-then-write rather than a raw
+        // decrement expression; a business paying for its own
+        // subscription isn't a high-concurrency path, so this is safe.
+        if (discountApplied) {
+          const { data: biz } = await supabase
+            .from('businesses')
+            .select('available_referral_discounts')
+            .eq('id', businessId)
+            .single();
+          const remaining = Math.max(0, (biz?.available_referral_discounts || 0) - 1);
+          await supabase.from('businesses').update({ available_referral_discounts: remaining }).eq('id', businessId);
+        }
+
+        // Referral qualification — only for the annual tier (matching
+        // the promo's own terms), and only the first time: a referral
+        // row is unique per referred_business_id, and this only ever
+        // touches one still in 'pending'. Whoever referred this
+        // business earns one future discount, credited here rather
+        // than at signup, since qualification was deliberately
+        // designed to require a real annual payment, not just a
+        // sign-up.
+        if (tierRow.months === 12) {
+          const { data: referral } = await supabase
+            .from('referrals')
+            .select('id, referrer_business_id')
+            .eq('referred_business_id', businessId)
+            .eq('status', 'pending')
+            .maybeSingle();
+
+          if (referral) {
+            await supabase
+              .from('referrals')
+              .update({ status: 'qualified', qualified_at: new Date().toISOString() })
+              .eq('id', referral.id);
+
+            const { data: referrer } = await supabase
+              .from('businesses')
+              .select('available_referral_discounts')
+              .eq('id', referral.referrer_business_id)
+              .single();
+            await supabase
+              .from('businesses')
+              .update({ available_referral_discounts: (referrer?.available_referral_discounts || 0) + 1 })
+              .eq('id', referral.referrer_business_id);
+          }
+        }
       }
     } else if (paymentType === 'school_fee_installment' && invoiceId) {
       // A parent paying part of a school-fee invoice online (see

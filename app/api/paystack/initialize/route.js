@@ -37,14 +37,27 @@ export async function POST(request) {
   // Paystack customer back to this business later.
   await supabase.from('businesses').update({ email }).eq('id', business.id);
 
+  // Referral discount: one-time 20% off, only on the annual tier
+  // (months === 12 — identified by duration rather than a hardcoded
+  // tier id, since tiers are admin-configurable and their ids aren't
+  // fixed strings), only if this business has actually earned one (see
+  // schema_referrals.sql). Not consumed here — only a successful
+  // payment should ever spend it, so app/api/paystack/webhook is what
+  // actually decrements it, once charge.success genuinely fires.
+  const isAnnual = tierRow.months === 12;
+  const discountApplied = isAnnual && business.available_referral_discounts > 0;
+  const amountNaira = discountApplied ? tierRow.amount_naira * 0.8 : tierRow.amount_naira;
+
   try {
     const result = await initializeTransaction({
       email,
-      amountKobo: Math.round(tierRow.amount_naira * 100),
+      amountKobo: Math.round(amountNaira * 100),
       callbackUrl: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?payment=success`,
       // tier travels through to the webhook via metadata so it knows how
       // far forward to push plan_renews_at and which plan_interval to record.
-      metadata: { business_id: business.id, tier },
+      // discount_applied tells the webhook to actually spend the credit
+      // only once this specific, discounted payment succeeds.
+      metadata: { business_id: business.id, tier, discount_applied: discountApplied },
     });
 
     return NextResponse.json({ authorization_url: result.data.authorization_url });

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { csrfFetch } from '../../../lib/csrfFetch';
 
 export default function AnnouncementsManager({ announcements }) {
   const router = useRouter();
@@ -18,7 +19,7 @@ export default function AnnouncementsManager({ announcements }) {
     setSaving(true);
     setError('');
     try {
-      const res = await fetch('/api/admin/announcements', {
+      const res = await csrfFetch('/api/admin/announcements', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title, message, cta_label: ctaLabel, cta_url: ctaUrl, target_plan: targetPlan }),
@@ -36,7 +37,7 @@ export default function AnnouncementsManager({ announcements }) {
 
   async function toggleActive(id, active) {
     setBusyId(id);
-    await fetch(`/api/admin/announcements/${id}`, {
+    await csrfFetch(`/api/admin/announcements/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ active }),
@@ -48,7 +49,7 @@ export default function AnnouncementsManager({ announcements }) {
   async function remove(id) {
     if (!confirm('Delete this announcement permanently? This cannot be undone.')) return;
     setBusyId(id);
-    await fetch(`/api/admin/announcements/${id}`, { method: 'DELETE' });
+    await csrfFetch(`/api/admin/announcements/${id}`, { method: 'DELETE' });
     setBusyId(null);
     router.refresh();
   }
