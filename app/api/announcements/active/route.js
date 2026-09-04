@@ -3,6 +3,11 @@ import { createRouteClient, getMyBusinessId } from '../../../../lib/supabaseServ
 import { createAdminClient } from '../../../../lib/supabaseAdmin';
 
 export const dynamic = 'force-dynamic';
+// See receipt-data/route.js's comment on this exact pair of settings —
+// dynamic alone isn't sufficient for the createAdminClient() read
+// below to always be fresh; this is the separate setting that actually
+// guarantees it.
+export const fetchCache = 'force-no-store';
 
 // One announcement at a time, most recent first — if the admin has
 // several active at once, only the newest one shows; older ones stay

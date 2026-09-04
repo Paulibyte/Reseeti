@@ -4,6 +4,13 @@ import { createAdminClient } from '../../../../lib/supabaseAdmin';
 import { isPlatformAdmin } from '../../../../lib/isPlatformAdmin';
 import { verifyCsrfToken } from '../../../../lib/csrf';
 
+// See receipt-data/route.js's comment on this exact pair of settings —
+// not currently called by the admin UI (page.js reads announcements
+// directly), but this GET exists for any future caller, and fixed here
+// too so it doesn't become its own separate bug report later.
+export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
+
 const VALID_TARGETS = ['all', 'free', 'pro'];
 
 async function requireAdmin() {
