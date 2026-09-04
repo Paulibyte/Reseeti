@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import Logo from '../components/Logo';
+import HelpTutorials from './HelpTutorials';
 
 const FAQ_SECTIONS = [
   {
@@ -146,6 +147,12 @@ export default function HelpPage() {
           Common questions about using Reseeti. Can't find what you need? Use the feedback button in the app to
           reach us directly.
         </p>
+
+        <HelpTutorials />
+
+        <h1 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', fontSize: 20, margin: '0 0 16px' }}>
+          Frequently asked questions
+        </h1>
 
         {FAQ_SECTIONS.map((section) => (
           <div key={section.title} style={{ marginBottom: 28 }}>
