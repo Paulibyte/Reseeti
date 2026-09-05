@@ -4,12 +4,18 @@ import { initializeTransaction } from '../../../../lib/paystack';
 
 const MIN_PAYMENT = 1000;
 
-// Deliberately public — a parent paying a school fee has no Reseeti
-// account and no session, the same way the WhatsApp catalogue checkout
-// is public. Every number that actually matters (remaining balance,
-// the minimum) is computed and enforced here, server-side, from the
-// real invoice_payments already recorded — the amount the client sends
-// is only ever a request, never trusted as fact.
+// Originally school-fee-only (app/api/school/fee-payment/route.js) —
+// generalized to any invoice once the underlying need turned out not
+// to be school-specific at all: a customer with an outstanding balance
+// on any purchase can pay it down online, the same way a parent
+// already could for a fee invoice. The only thing that changed is
+// removing the student_id gate below; every other safeguard is
+// unchanged. Deliberately public — the customer paying has no Reseeti
+// account and no session, same as the WhatsApp catalogue checkout.
+// Every number that actually matters (remaining balance, the minimum)
+// is computed and enforced here, server-side, from the real
+// invoice_payments already recorded — the amount the client sends is
+// only ever a request, never trusted as fact.
 export async function POST(req) {
   const { invoiceId, amount, email } = await req.json().catch(() => ({}));
 
@@ -21,20 +27,12 @@ export async function POST(req) {
 
   const { data: invoice } = await supabase
     .from('invoices')
-    .select('id, total, business_id, student_id, invoice_payments(amount)')
+    .select('id, total, business_id, invoice_payments(amount)')
     .eq('id', invoiceId)
     .maybeSingle();
 
   if (!invoice) {
     return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
-  }
-
-  // Scoped to school-fee invoices only, as decided — a plain sale
-  // invoice (no student_id) can't be paid this way, regardless of
-  // whether the business has online payments set up for other reasons
-  // (e.g. the WhatsApp catalogue).
-  if (!invoice.student_id) {
-    return NextResponse.json({ error: 'This invoice is not eligible for online installment payment' }, { status: 400 });
   }
 
   const paidSoFar = (invoice.invoice_payments || []).reduce((sum, p) => sum + Number(p.amount), 0);
@@ -59,7 +57,7 @@ export async function POST(req) {
     .maybeSingle();
 
   if (!business?.paystack_subaccount_code) {
-    return NextResponse.json({ error: 'Online payments are not set up for this school yet' }, { status: 400 });
+    return NextResponse.json({ error: 'Online payments are not set up for this business yet' }, { status: 400 });
   }
 
   try {
@@ -67,7 +65,7 @@ export async function POST(req) {
       email,
       amountKobo: Math.round(requestedAmount * 100),
       callbackUrl: `${process.env.NEXT_PUBLIC_APP_URL}/inv/${invoiceId}`,
-      metadata: { payment_type: 'school_fee_installment', invoice_id: invoiceId },
+      metadata: { payment_type: 'invoice_installment', invoice_id: invoiceId },
       subaccountCode: business.paystack_subaccount_code,
     });
     return NextResponse.json({ authorization_url: tx.data.authorization_url });

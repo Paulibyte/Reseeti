@@ -122,16 +122,18 @@ export async function POST(request) {
           }
         }
       }
-    } else if (paymentType === 'school_fee_installment' && invoiceId) {
-      // A parent paying part of a school-fee invoice online (see
-      // app/api/school/fee-payment/route.js, which set this metadata
-      // when the transaction was initialized). Recording a plain
-      // invoice_payments row here is deliberately the ONLY thing this
-      // branch does — it's the exact same insert staff already make via
-      // "Record payment" on the customer page, so whatever logic
-      // already marks an invoice fully paid once payments cover the
-      // total keeps working unchanged; there's no separate "mark paid"
-      // step to duplicate or get out of sync.
+    } else if (paymentType === 'invoice_installment' && invoiceId) {
+      // A customer paying part of any unpaid invoice online (see
+      // app/api/invoices/pay-balance/route.js, which set this metadata
+      // when the transaction was initialized — originally school-fee-
+      // only, generalized once the need turned out not to be
+      // school-specific). Recording a plain invoice_payments row here
+      // is deliberately the ONLY thing this branch does — it's the
+      // exact same insert staff already make via "Record payment" on
+      // the customer page, so whatever logic already marks an invoice
+      // fully paid once payments cover the total keeps working
+      // unchanged; there's no separate "mark paid" step to duplicate
+      // or get out of sync.
       await supabase.from('invoice_payments').insert({
         invoice_id: invoiceId,
         method: 'card',
@@ -141,7 +143,7 @@ export async function POST(request) {
       const { data: inv } = await supabase.from('invoices').select('business_id').eq('id', invoiceId).maybeSingle();
       await supabase.from('events').insert({
         business_id: inv?.business_id || null,
-        event_type: 'school_fee_installment_paid',
+        event_type: 'invoice_installment_paid',
         metadata: { reference: event.data.reference, invoice_id: invoiceId, amount: event.data.amount / 100 },
       });
     }

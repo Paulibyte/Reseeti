@@ -452,8 +452,8 @@ export default function ReceiptClient({ invoice, business, signature, offlineMod
             </div>
           )}
 
-          {!invoice.paid && invoice.student_id && business.paystack_subaccount_code && (
-            <SchoolFeePaymentBox invoice={invoice} parentEmail={invoice.customers?.email} />
+          {!invoice.paid && business.paystack_subaccount_code && (
+            <InvoiceBalancePaymentBox invoice={invoice} customerEmail={invoice.customers?.email} />
           )}
 
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 20, paddingTop: 14, borderTop: '2px dashed var(--border)' }}>
@@ -574,16 +574,18 @@ export default function ReceiptClient({ invoice, business, signature, offlineMod
   );
 }
 
-// Lets a parent pay part of a school-fee invoice online, no login or
-// staff involvement needed. Every meaningful number (remaining
-// balance, the ₦1,000 minimum) is re-validated server-side in
-// app/api/school/fee-payment/route.js — this component only ever
+// Lets a customer pay part of any unpaid invoice online, no login or
+// staff involvement needed — originally built for school fees only,
+// generalized once it was clear the underlying need wasn't
+// school-specific at all. Every meaningful number (remaining balance,
+// the ₦1,000 minimum) is re-validated server-side in
+// app/api/invoices/pay-balance/route.js — this component only ever
 // proposes an amount, it never enforces anything on its own.
-function SchoolFeePaymentBox({ invoice, parentEmail }) {
+function InvoiceBalancePaymentBox({ invoice, customerEmail }) {
   const paidSoFar = (invoice.invoice_payments || []).reduce((sum, p) => sum + Number(p.amount), 0);
   const remaining = Number(invoice.total) - paidSoFar;
   const [amount, setAmount] = useState(String(remaining));
-  const [email, setEmail] = useState(parentEmail || '');
+  const [email, setEmail] = useState(customerEmail || '');
   const [paying, setPaying] = useState(false);
   const [error, setError] = useState('');
 
@@ -594,7 +596,7 @@ function SchoolFeePaymentBox({ invoice, parentEmail }) {
     if (!email.trim()) { setError('Enter an email address to receive your payment receipt.'); return; }
     setPaying(true);
     try {
-      const res = await fetch('/api/school/fee-payment', {
+      const res = await fetch('/api/invoices/pay-balance', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ invoiceId: invoice.id, amount: Number(amount), email: email.trim() }),
@@ -611,7 +613,7 @@ function SchoolFeePaymentBox({ invoice, parentEmail }) {
   return (
     <div style={{ marginTop: 18, padding: '14px 16px', background: 'var(--success-bg)', border: '1px solid var(--success)', borderRadius: 8 }} data-html2canvas-ignore="true">
       <p style={{ margin: '0 0 8px', fontWeight: 700, fontSize: 12.5, color: 'var(--success)', textTransform: 'uppercase', letterSpacing: 0.3 }}>
-        Pay towards this fee online
+        Pay towards this balance online
       </p>
       <p style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--text-muted)' }}>
         Remaining balance: <strong>{formatNaira(remaining)}</strong>. Pay all of it now, or any amount of at least ₦1,000.
