@@ -1,14 +1,36 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { createClient } from '../../../lib/supabaseClient';
+import { getMyBusiness } from '../../../lib/getMyBusiness';
+import DashboardShell from '../DashboardShell';
 
 export default function DeviceLookupPage() {
   const supabase = createClient();
+  const router = useRouter();
+  const [business, setBusiness] = useState(null);
+  const [role, setRole] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [result, setResult] = useState(null);
   const [searched, setSearched] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [searching, setSearching] = useState(false);
+
+  useEffect(() => { load(); }, []);
+
+  async function load() {
+    const { user, business: biz, role: r } = await getMyBusiness(supabase);
+    if (!user) { router.push('/login'); return; }
+    setBusiness(biz);
+    setRole(r);
+    setLoading(false);
+  }
+
+  async function signOut() {
+    await supabase.auth.signOut();
+    router.push('/login');
+  }
 
   // RLS already scopes this to the caller's own business — this tool
   // traces a dealer's own stock and sales history, not a cross-business
@@ -16,7 +38,7 @@ export default function DeviceLookupPage() {
   async function search() {
     const term = query.trim();
     if (!term) return;
-    setLoading(true);
+    setSearching(true);
     setSearched(true);
     const { data } = await supabase
       .from('device_units')
@@ -24,12 +46,17 @@ export default function DeviceLookupPage() {
       .or(`serial_number.eq.${term},imei1.eq.${term},imei2.eq.${term}`)
       .maybeSingle();
     setResult(data || null);
-    setLoading(false);
+    setSearching(false);
   }
 
   const sale = result?.invoice_items?.[0]?.invoices;
 
+  if (loading || !business) {
+    return <main style={{ padding: 40, color: 'var(--text-muted)' }}>Loading…</main>;
+  }
+
   return (
+    <DashboardShell plan={business.plan} role={role} onSignOut={signOut}>
     <div style={{ padding: 20, maxWidth: 560 }}>
       <h1 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', fontSize: 22, margin: '0 0 6px' }}>Serial / IMEI Lookup</h1>
       <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 18px' }}>
@@ -46,14 +73,14 @@ export default function DeviceLookupPage() {
         />
         <button
           onClick={search}
-          disabled={loading || !query.trim()}
+          disabled={searching || !query.trim()}
           style={{ background: 'var(--orange)', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 13.5 }}
         >
-          {loading ? 'Searching…' : 'Search'}
+          {searching ? 'Searching…' : 'Search'}
         </button>
       </div>
 
-      {searched && !loading && !result && (
+      {searched && !searching && !result && (
         <p style={{ color: 'var(--text-faint)', fontSize: 13.5 }}>No unit found matching that serial number or IMEI.</p>
       )}
 
@@ -110,5 +137,6 @@ export default function DeviceLookupPage() {
         </div>
       )}
     </div>
+    </DashboardShell>
   );
 }

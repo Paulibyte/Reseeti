@@ -1,14 +1,19 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { createClient } from '../../../lib/supabaseClient';
+import { getMyBusiness } from '../../../lib/getMyBusiness';
+import DashboardShell from '../DashboardShell';
 
 const inputStyle = { width: '100%', padding: '9px 11px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 14, marginBottom: 10, boxSizing: 'border-box', background: 'var(--bg)', color: 'var(--text)' };
 const labelStyle = { fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 6 };
 
 export default function SuppliersPage() {
   const supabase = createClient();
-  const [businessId, setBusinessId] = useState(null);
+  const router = useRouter();
+  const [business, setBusiness] = useState(null);
+  const [role, setRole] = useState(null);
   const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -25,26 +30,23 @@ export default function SuppliersPage() {
   useEffect(() => { load(); }, []);
 
   async function load() {
-    setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setLoading(false); return; }
-    const { data: membership } = await supabase
-      .from('business_members')
-      .select('business_id')
-      .eq('user_id', user.id)
-      .eq('status', 'active')
-      .limit(1)
-      .maybeSingle();
-    if (!membership) { setLoading(false); return; }
-    setBusinessId(membership.business_id);
+    const { user, business: biz, role: r } = await getMyBusiness(supabase);
+    if (!user) { router.push('/login'); return; }
+    setBusiness(biz);
+    setRole(r);
 
     const { data: sup } = await supabase
       .from('suppliers')
       .select('*, supplier_contacts(*)')
-      .eq('business_id', membership.business_id)
+      .eq('business_id', biz.id)
       .order('name');
     setSuppliers(sup || []);
     setLoading(false);
+  }
+
+  async function signOut() {
+    await supabase.auth.signOut();
+    router.push('/login');
   }
 
   async function addSupplier() {
@@ -52,7 +54,7 @@ export default function SuppliersPage() {
     setSaving(true);
     setError('');
     const { error: dbError } = await supabase.from('suppliers').insert({
-      business_id: businessId,
+      business_id: business.id,
       name: name.trim(),
       address: address.trim() || null,
       notes: notes.trim() || null,
@@ -72,7 +74,7 @@ export default function SuppliersPage() {
   async function addContact(supplierId) {
     if (!contactName.trim()) return;
     await supabase.from('supplier_contacts').insert({
-      business_id: businessId,
+      business_id: business.id,
       supplier_id: supplierId,
       name: contactName.trim(),
       phone: contactPhone.trim() || null,
@@ -87,9 +89,12 @@ export default function SuppliersPage() {
     load();
   }
 
-  if (loading) return <p style={{ color: 'var(--text-faint)', padding: 16 }}>Loading…</p>;
+  if (loading || !business) {
+    return <main style={{ padding: 40, color: 'var(--text-muted)' }}>Loading…</main>;
+  }
 
   return (
+    <DashboardShell plan={business.plan} role={role} onSignOut={signOut}>
     <div style={{ padding: 20, maxWidth: 640 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
         <h1 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', fontSize: 22, margin: 0 }}>Suppliers</h1>
@@ -176,5 +181,6 @@ export default function SuppliersPage() {
         </div>
       )}
     </div>
+    </DashboardShell>
   );
 }

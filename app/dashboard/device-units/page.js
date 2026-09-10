@@ -2,7 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
+import { useRouter } from 'next/navigation';
 import { createClient } from '../../../lib/supabaseClient';
+import { getMyBusiness } from '../../../lib/getMyBusiness';
+import DashboardShell from '../DashboardShell';
 
 const ImportModal = dynamic(() => import('../ImportModal'), { ssr: false });
 
@@ -15,7 +18,9 @@ function blankUnit() {
 
 export default function DeviceUnitsPage() {
   const supabase = createClient();
-  const [businessId, setBusinessId] = useState(null);
+  const router = useRouter();
+  const [business, setBusiness] = useState(null);
+  const [role, setRole] = useState(null);
   const [products, setProducts] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [selectedProductId, setSelectedProductId] = useState('');
@@ -26,27 +31,21 @@ export default function DeviceUnitsPage() {
   const [existingUnits, setExistingUnits] = useState([]);
   const [loadingUnits, setLoadingUnits] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => { load(); }, []);
   useEffect(() => { if (selectedProductId) loadUnitsForProduct(selectedProductId); else setExistingUnits([]); }, [selectedProductId]);
 
   async function load() {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    const { data: membership } = await supabase
-      .from('business_members')
-      .select('business_id')
-      .eq('user_id', user.id)
-      .eq('status', 'active')
-      .limit(1)
-      .maybeSingle();
-    if (!membership) return;
-    setBusinessId(membership.business_id);
+    const { user, business: biz, role: r } = await getMyBusiness(supabase);
+    if (!user) { router.push('/login'); return; }
+    setBusiness(biz);
+    setRole(r);
 
     const { data: prods } = await supabase
       .from('products')
       .select('id, name')
-      .eq('business_id', membership.business_id)
+      .eq('business_id', biz.id)
       .eq('is_serialized', true)
       .order('name');
     setProducts(prods || []);
@@ -54,9 +53,10 @@ export default function DeviceUnitsPage() {
     const { data: sups } = await supabase
       .from('suppliers')
       .select('id, name')
-      .eq('business_id', membership.business_id)
+      .eq('business_id', biz.id)
       .order('name');
     setSuppliers(sups || []);
+    setLoading(false);
   }
 
   // Sold status is derived, not stored — a unit is sold if any
@@ -90,7 +90,7 @@ export default function DeviceUnitsPage() {
     setSaving(true);
     const { error: dbError } = await supabase.from('device_units').insert(
       cleaned.map((r) => ({
-        business_id: businessId,
+        business_id: business.id,
         product_id: selectedProductId,
         supplier_id: selectedSupplierId || null,
         serial_number: r.serial_number.trim(),
@@ -108,7 +108,17 @@ export default function DeviceUnitsPage() {
     loadUnitsForProduct(selectedProductId);
   }
 
+  async function signOut() {
+    await supabase.auth.signOut();
+    router.push('/login');
+  }
+
+  if (loading || !business) {
+    return <main style={{ padding: 40, color: 'var(--text-muted)' }}>Loading…</main>;
+  }
+
   return (
+    <DashboardShell plan={business.plan} role={role} onSignOut={signOut}>
     <div style={{ padding: 20, maxWidth: 800 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
         <h1 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', fontSize: 22, margin: 0 }}>Device Units</h1>
@@ -216,7 +226,7 @@ export default function DeviceUnitsPage() {
         <ImportModal
           title="Import device units"
           table="device_units"
-          business={{ id: businessId }}
+          business={{ id: business.id }}
           supabase={supabase}
           onClose={() => setShowImport(false)}
           onImported={() => { if (selectedProductId) loadUnitsForProduct(selectedProductId); }}
@@ -262,5 +272,6 @@ export default function DeviceUnitsPage() {
         />
       )}
     </div>
+    </DashboardShell>
   );
 }
