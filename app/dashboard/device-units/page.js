@@ -9,7 +9,7 @@ import DashboardShell from '../DashboardShell';
 
 const ImportModal = dynamic(() => import('../ImportModal'), { ssr: false });
 
-const inputStyle = { padding: '8px 9px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13, background: 'var(--bg)', color: 'var(--text)' };
+const inputStyle = { padding: '8px 9px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13, background: 'var(--bg)', color: 'var(--text)', boxSizing: 'border-box' };
 const labelStyle = { fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 6 };
 
 // Matches on name only after collapsing ALL whitespace (not just
@@ -175,20 +175,26 @@ export default function DeviceUnitsPage() {
               <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: 16, marginBottom: 20 }}>
                 <p style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-muted)', margin: '0 0 10px', textTransform: 'uppercase' }}>Add units received</p>
                 {rows.map((row, idx) => (
-                  <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 0.8fr 0.8fr 1fr 0.8fr auto', gap: 6, marginBottom: 8, alignItems: 'center' }}>
-                    <input value={row.serial_number} onChange={(e) => updateRow(idx, 'serial_number', e.target.value)} placeholder="Serial number *" style={inputStyle} />
-                    <input value={row.imei1} onChange={(e) => updateRow(idx, 'imei1', e.target.value)} placeholder="IMEI 1" style={inputStyle} />
-                    <input value={row.imei2} onChange={(e) => updateRow(idx, 'imei2', e.target.value)} placeholder="IMEI 2" style={inputStyle} />
-                    <input value={row.color} onChange={(e) => updateRow(idx, 'color', e.target.value)} placeholder="Color" style={inputStyle} />
-                    <select value={row.condition} onChange={(e) => updateRow(idx, 'condition', e.target.value)} style={inputStyle}>
+                  // A wrapping flex row, not a rigid fixed-column grid —
+                  // on a narrower available width (a smaller window, or
+                  // the app's own floating Feedback tab eating into the
+                  // right edge of the screen), fields naturally drop to
+                  // a new line instead of getting squeezed or hidden
+                  // behind whatever else is competing for that space.
+                  <div key={idx} style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8, alignItems: 'center' }}>
+                    <input value={row.serial_number} onChange={(e) => updateRow(idx, 'serial_number', e.target.value)} placeholder="Serial number *" style={{ ...inputStyle, flex: '1 1 150px' }} />
+                    <input value={row.imei1} onChange={(e) => updateRow(idx, 'imei1', e.target.value)} placeholder="IMEI 1" style={{ ...inputStyle, flex: '1 1 120px' }} />
+                    <input value={row.imei2} onChange={(e) => updateRow(idx, 'imei2', e.target.value)} placeholder="IMEI 2" style={{ ...inputStyle, flex: '1 1 120px' }} />
+                    <input value={row.color} onChange={(e) => updateRow(idx, 'color', e.target.value)} placeholder="Color" style={{ ...inputStyle, flex: '1 1 100px' }} />
+                    <select value={row.condition} onChange={(e) => updateRow(idx, 'condition', e.target.value)} style={{ ...inputStyle, flex: '1 1 100px' }}>
                       <option value="new">New</option>
                       <option value="used">Used</option>
                       <option value="refurbished">Refurbished</option>
                     </select>
-                    <input value={row.specs} onChange={(e) => updateRow(idx, 'specs', e.target.value)} placeholder="e.g. 128GB, 8GB RAM" style={inputStyle} />
-                    <input type="number" min="0" value={row.cost_price} onChange={(e) => updateRow(idx, 'cost_price', e.target.value)} placeholder="Cost" style={inputStyle} />
+                    <input value={row.specs} onChange={(e) => updateRow(idx, 'specs', e.target.value)} placeholder="e.g. 128GB, 8GB RAM" style={{ ...inputStyle, flex: '1 1 150px' }} />
+                    <input type="number" min="0" value={row.cost_price} onChange={(e) => updateRow(idx, 'cost_price', e.target.value)} placeholder="Cost" style={{ ...inputStyle, flex: '1 1 90px' }} />
                     {rows.length > 1 && (
-                      <button onClick={() => removeRow(idx)} style={{ background: 'none', border: 'none', color: 'var(--danger)', fontSize: 18, cursor: 'pointer' }}>×</button>
+                      <button onClick={() => removeRow(idx)} style={{ background: 'none', border: 'none', color: 'var(--danger)', fontSize: 18, cursor: 'pointer', flexShrink: 0 }}>×</button>
                     )}
                   </div>
                 ))}
