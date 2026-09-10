@@ -24,6 +24,16 @@ export default function InvoiceForm({ business, onClose, onSaved, resumeDraft, o
   const [savingCustomer, setSavingCustomer] = useState(false);
   const [customerError, setCustomerError] = useState('');
   const [items, setItems] = useState(resumeDraft?.items || [{ description: '', qty: 1, price: '', product_id: null }]);
+  // Serialized-item picker (phones/laptops/watches tracked by serial
+  // number/IMEI — see schema_device_dealers.sql). unitPickerFor holds
+  // {idx, product} while the picker is open for a given row;
+  // availableUnits is that product's unsold units, fetched fresh each
+  // time so two sales in quick succession can't both be offered the
+  // same already-picked unit.
+  const [unitPickerFor, setUnitPickerFor] = useState(null);
+  const [availableUnits, setAvailableUnits] = useState([]);
+  const [loadingUnits, setLoadingUnits] = useState(false);
+  const [itemsError, setItemsError] = useState('');
   const [aiText, setAiText] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
@@ -148,7 +158,10 @@ export default function InvoiceForm({ business, onClose, onSaved, resumeDraft, o
   // Called when a description matches a known product exactly (i.e. the
   // person picked it from the datalist rather than typing something new).
   // Auto-fills price and tags the row with product_id so the sale
-  // decrements that product's stock once synced.
+  // decrements that product's stock once synced. For a serialized
+  // product (phones, laptops, etc.), this opens the unit picker instead
+  // of finishing the row immediately — a specific physical unit must be
+  // chosen before the row is considered complete (see pickUnit below).
   function handleDescriptionChange(idx, value) {
     const match = products.find((p) => p.name === value || p.barcode === value);
     const next = [...items];
@@ -156,10 +169,43 @@ export default function InvoiceForm({ business, onClose, onSaved, resumeDraft, o
     if (match) {
       next[idx].price = match.price;
       next[idx].product_id = match.id;
+      next[idx].device_unit_id = null;
     } else {
       next[idx].product_id = null;
+      next[idx].device_unit_id = null;
     }
     setItems(next);
+
+    if (match?.is_serialized) {
+      openUnitPicker(idx, match);
+    }
+  }
+
+  async function openUnitPicker(idx, product) {
+    setUnitPickerFor({ idx, product });
+    setLoadingUnits(true);
+    // Fetched fresh every time the picker opens, not cached — the
+    // whole point is showing what's genuinely still available right
+    // now, not a stale list from when the invoice form first loaded.
+    const { data } = await supabase
+      .from('device_units')
+      .select('id, serial_number, imei1, color, condition, invoice_items(id)')
+      .eq('product_id', product.id);
+    setAvailableUnits((data || []).filter((u) => !u.invoice_items || u.invoice_items.length === 0));
+    setLoadingUnits(false);
+  }
+
+  function pickUnit(unit) {
+    if (!unitPickerFor) return;
+    const { idx, product } = unitPickerFor;
+    const next = [...items];
+    next[idx].device_unit_id = unit.id;
+    // The receipt itself now shows which exact unit this customer
+    // bought — genuinely useful to them too, as proof of purchase tied
+    // to a specific serial/IMEI, not just "a phone."
+    next[idx].description = `${product.name} (SN: ${unit.serial_number})`;
+    setItems(next);
+    setUnitPickerFor(null);
   }
 
   // Fired when the customer dropdown changes. The special values 'walkin'
@@ -370,6 +416,20 @@ export default function InvoiceForm({ business, onClose, onSaved, resumeDraft, o
       setCustomerError('Finish adding the customer (or switch back to Walk-in) before saving the invoice.');
       return;
     }
+    // A serialized product with no specific unit picked would mean
+    // selling "some phone, unspecified" — exactly what this whole
+    // feature exists to prevent. Checked here rather than only at the
+    // picker step, since a row's product could in principle change
+    // after a unit was picked (removed then re-added, etc.).
+    const missingUnit = items.find((it) => {
+      const product = products.find((p) => p.id === it.product_id);
+      return product?.is_serialized && !it.device_unit_id;
+    });
+    if (missingUnit) {
+      setItemsError('One or more items need a specific unit (serial/IMEI) picked before saving — click the item to choose one.');
+      return;
+    }
+    setItemsError('');
     setSaving(true);
     const draft = {
       customer_id: customerId,
@@ -395,6 +455,7 @@ export default function InvoiceForm({ business, onClose, onSaved, resumeDraft, o
         qty: Number(it.qty) || 1,
         price: Number(it.price) || 0,
         product_id: it.product_id || null,
+        device_unit_id: it.device_unit_id || null,
       })),
     };
 
@@ -633,6 +694,7 @@ export default function InvoiceForm({ business, onClose, onSaved, resumeDraft, o
 
       {items.map((it, idx) => {
         const warning = stockWarning(it);
+        const matchedProduct = it.product_id ? products.find((p) => p.id === it.product_id) : null;
         return (
           <div key={idx}>
             <div style={{ display: 'flex', gap: 8, marginBottom: warning ? 3 : 8 }}>
@@ -670,6 +732,24 @@ export default function InvoiceForm({ business, onClose, onSaved, resumeDraft, o
             </div>
             {warning && (
               <p style={{ fontSize: 11.5, color: 'var(--danger)', margin: '0 0 8px', fontWeight: warning.level === 'danger' ? 700 : 400 }}>⚠ {warning.text}</p>
+            )}
+            {matchedProduct?.is_serialized && !it.device_unit_id && (
+              <button
+                type="button"
+                onClick={() => openUnitPicker(idx, matchedProduct)}
+                style={{ background: 'var(--orange-bg)', border: '1px solid var(--orange)', color: 'var(--orange-dark)', borderRadius: 6, padding: '5px 10px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', marginBottom: 8 }}
+              >
+                ⚠ Choose which unit (serial/IMEI) is being sold
+              </button>
+            )}
+            {matchedProduct?.is_serialized && it.device_unit_id && (
+              <button
+                type="button"
+                onClick={() => openUnitPicker(idx, matchedProduct)}
+                style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: 6, padding: '5px 10px', fontSize: 11.5, cursor: 'pointer', marginBottom: 8 }}
+              >
+                ✓ Unit selected — change
+              </button>
             )}
           </div>
         );
@@ -774,6 +854,7 @@ export default function InvoiceForm({ business, onClose, onSaved, resumeDraft, o
       </div>
 
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        {itemsError && <p style={{ color: 'var(--danger)', fontSize: 13, margin: '0 0 8px' }}>{itemsError}</p>}
         <button onClick={save} disabled={saving} style={{ background: 'var(--orange)', color: '#fff', border: 'none', padding: '10px 18px', borderRadius: 4, fontWeight: 700, cursor: 'pointer' }}>
           {saving ? 'Saving…' : 'Save invoice'}
         </button>
@@ -789,6 +870,48 @@ export default function InvoiceForm({ business, onClose, onSaved, resumeDraft, o
           Cancel
         </button>
       </div>
+
+      {unitPickerFor && (
+        <div style={{ position: 'fixed', inset: 0, background: 'var(--overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 70 }}>
+          <div style={{ background: 'var(--surface)', borderRadius: 10, padding: 24, maxWidth: 380, width: '100%', maxHeight: '80vh', display: 'flex', flexDirection: 'column', borderTop: '5px solid var(--orange)' }}>
+            <h3 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', marginTop: 0, fontSize: 16 }}>
+              Choose which {unitPickerFor.product.name}
+            </h3>
+            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: -6, marginBottom: 12 }}>
+              This item is tracked by serial number/IMEI — pick the exact unit being sold.
+            </p>
+            <div style={{ overflowY: 'auto', flex: 1, marginBottom: 14 }}>
+              {loadingUnits && <p style={{ color: 'var(--text-faint)', fontSize: 13 }}>Loading available units…</p>}
+              {!loadingUnits && availableUnits.length === 0 && (
+                <p style={{ color: 'var(--text-faint)', fontSize: 13 }}>
+                  No unsold units recorded for this product yet — add some from the Device Units page first.
+                </p>
+              )}
+              {availableUnits.map((u) => (
+                <button
+                  key={u.id}
+                  onClick={() => pickUnit(u)}
+                  style={{
+                    display: 'block', width: '100%', textAlign: 'left', background: 'var(--bg)', border: '1px solid var(--border)',
+                    borderRadius: 6, padding: '10px 12px', marginBottom: 8, cursor: 'pointer', color: 'var(--text)', fontSize: 13,
+                  }}
+                >
+                  <strong>{u.serial_number}</strong>
+                  {u.color ? ` · ${u.color}` : ''}{u.condition ? ` · ${u.condition}` : ''}
+                  {u.imei1 ? <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: 2 }}>IMEI: {u.imei1}</div> : null}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => setUnitPickerFor(null)}
+              style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text)', padding: '9px 16px', borderRadius: 6, cursor: 'pointer', alignSelf: 'flex-start' }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

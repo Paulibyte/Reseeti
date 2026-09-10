@@ -17,6 +17,7 @@ export default function ProductForm({ business, product, familyId, familyName, o
     cost_price: product?.cost_price ?? '',
     stock_qty: product?.stock_qty ?? '',
     low_stock_threshold: product?.low_stock_threshold ?? 5,
+    is_serialized: product?.is_serialized || false,
     unit: product?.unit || '',
     unit_value: product?.unit_value ?? '',
     show_in_catalogue: product?.show_in_catalogue || false,
@@ -78,6 +79,9 @@ export default function ProductForm({ business, product, familyId, familyName, o
       // "don't apply out-of-stock logic," not "read this number."
       stock_qty: form.type === 'service' ? 0 : (Number(form.stock_qty) || 0),
       low_stock_threshold: form.type === 'service' ? 0 : (Number(form.low_stock_threshold) || 0),
+      // Only meaningful for a real product — a service can't be
+      // serialized, same reasoning as stock_qty above.
+      is_serialized: form.type === 'product' ? form.is_serialized : false,
       unit: form.unit || null,
       unit_value: form.unit_value === '' ? null : Number(form.unit_value),
       show_in_catalogue: business.plan === 'pro' ? form.show_in_catalogue : false,
@@ -300,6 +304,15 @@ export default function ProductForm({ business, product, familyId, familyName, o
               <p style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: -6 }}>
                 You'll see a low-stock warning once quantity on hand drops to or below this number.
               </p>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, cursor: 'pointer', fontSize: 13.5, color: 'var(--text)' }}>
+                <input type="checkbox" checked={form.is_serialized} onChange={(e) => set('is_serialized', e.target.checked)} />
+                Track individual units (serial number / IMEI) — for phones, laptops, and similar items
+              </label>
+              {form.is_serialized && (
+                <p style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: -6 }}>
+                  Add each physical unit's serial number, IMEI, and supplier from the Device Units page after saving. Current stock above becomes a display-only total once units are added — the real count comes from how many unsold units exist.
+                </p>
+              )}
             </>
           )}
 
