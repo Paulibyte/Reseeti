@@ -40,12 +40,21 @@ export default function DeviceLookupPage() {
     if (!term) return;
     setSearching(true);
     setSearched(true);
+    // .limit(1) rather than .maybeSingle() — the latter errors out
+    // entirely if more than one row matches, which is exactly what
+    // silently broke this tool once already (a duplicate serial number
+    // that should never have been possible to create — now prevented
+    // at the database level by a unique constraint, see
+    // schema_device_units_unique_serial.sql). This is a second,
+    // independent safeguard: even if a duplicate ever slipped through
+    // for some other reason, this tool would still show a real result
+    // instead of a false "not found."
     const { data } = await supabase
       .from('device_units')
       .select('*, products(name), suppliers(name, address, supplier_contacts(name, phone, role)), invoice_items(invoices(invoice_number, customer_name, customer_phone, created_at))')
       .or(`serial_number.eq.${term},imei1.eq.${term},imei2.eq.${term}`)
-      .maybeSingle();
-    setResult(data || null);
+      .limit(1);
+    setResult(data?.[0] || null);
     setSearching(false);
   }
 

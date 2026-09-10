@@ -1,0 +1,15 @@
+-- Prevents the exact issue just found: the same serial number getting
+-- saved twice (e.g. from retrying an import), which silently broke the
+-- Serial/IMEI Lookup tool — its query expects at most one match, and a
+-- duplicate caused it to fail rather than return either row, showing a
+-- false "no unit found" even though the unit genuinely existed.
+--
+-- Scoped per business (not globally unique) — two different businesses
+-- could each legitimately receive a device with an overlapping serial
+-- from different supply chains; what actually needs to be unique is
+-- "this business's own records for this one serial number."
+--
+-- Run the cleanup DELETE for any existing duplicates BEFORE this, or
+-- this constraint will fail to apply — see the accompanying message
+-- for the exact query.
+alter table device_units add constraint device_units_business_serial_unique unique (business_id, serial_number);
