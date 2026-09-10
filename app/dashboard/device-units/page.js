@@ -12,6 +12,18 @@ const ImportModal = dynamic(() => import('../ImportModal'), { ssr: false });
 const inputStyle = { padding: '8px 9px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13, background: 'var(--bg)', color: 'var(--text)' };
 const labelStyle = { fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 6 };
 
+// Matches on name only after collapsing ALL whitespace (not just
+// trimming the edges) into single regular spaces, and lowercasing.
+// Plain .trim() only strips leading/trailing whitespace — a stray
+// non-breaking space or double space in the MIDDLE of a name (common
+// from copy-pasting product names into a spreadsheet) looks completely
+// identical on screen but silently fails a strict comparison. \s in a
+// regex already matches non-breaking spaces too, so this one line
+// covers the whole class of "looks the same, isn't the same" mismatch.
+function normalizeForMatch(s) {
+  return String(s).replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
 function blankUnit() {
   return { serial_number: '', imei1: '', imei2: '', color: '', condition: 'new', specs: '', cost_price: '' };
 }
@@ -244,7 +256,15 @@ export default function DeviceUnitsPage() {
               // not a friendly one) — the product column must match an
               // existing serialized product's name exactly.
               transform: (v) => {
-                const match = products.find((p) => p.name.trim().toLowerCase() === String(v).trim().toLowerCase());
+                const match = products.find((p) => normalizeForMatch(p.name) === normalizeForMatch(v));
+                if (!match) {
+                  // Diagnostic only — safe to leave in permanently, it
+                  // never affects the import itself. If this still
+                  // shows up after the whitespace-normalizing fix
+                  // above, the logged values show exactly what's
+                  // actually being compared, rather than guessing again.
+                  console.warn('Device import: no product matched', { csvValue: v, normalized: normalizeForMatch(v), availableProducts: products.map((p) => ({ name: p.name, normalized: normalizeForMatch(p.name) })) });
+                }
                 return match ? match.id : null;
               },
             },
@@ -257,7 +277,7 @@ export default function DeviceUnitsPage() {
               // manual form.
               transform: (v) => {
                 if (!String(v).trim()) return null;
-                const match = suppliers.find((s) => s.name.trim().toLowerCase() === String(v).trim().toLowerCase());
+                const match = suppliers.find((s) => normalizeForMatch(s.name) === normalizeForMatch(v));
                 return match ? match.id : null;
               },
             },
