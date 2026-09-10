@@ -1,7 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { createClient } from '../../../lib/supabaseClient';
+
+const ImportModal = dynamic(() => import('../ImportModal'), { ssr: false });
 
 const inputStyle = { padding: '8px 9px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13, background: 'var(--bg)', color: 'var(--text)' };
 const labelStyle = { fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 6 };
@@ -22,6 +25,7 @@ export default function DeviceUnitsPage() {
   const [error, setError] = useState('');
   const [existingUnits, setExistingUnits] = useState([]);
   const [loadingUnits, setLoadingUnits] = useState(false);
+  const [showImport, setShowImport] = useState(false);
 
   useEffect(() => { load(); }, []);
   useEffect(() => { if (selectedProductId) loadUnitsForProduct(selectedProductId); else setExistingUnits([]); }, [selectedProductId]);
@@ -106,7 +110,17 @@ export default function DeviceUnitsPage() {
 
   return (
     <div style={{ padding: 20, maxWidth: 800 }}>
-      <h1 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', fontSize: 22, margin: '0 0 6px' }}>Device Units</h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+        <h1 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', fontSize: 22, margin: 0 }}>Device Units</h1>
+        {products.length > 0 && (
+          <button
+            onClick={() => setShowImport(true)}
+            style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '7px 14px', fontSize: 12.5, cursor: 'pointer' }}
+          >
+            ⬆ Import
+          </button>
+        )}
+      </div>
       <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 18px' }}>
         Record each physical unit — serial number, IMEI, color — when new stock comes in. Only products marked "Track individual units" in Inventory appear here.
       </p>
@@ -196,6 +210,56 @@ export default function DeviceUnitsPage() {
             </>
           )}
         </>
+      )}
+
+      {showImport && (
+        <ImportModal
+          title="Import device units"
+          table="device_units"
+          business={{ id: businessId }}
+          supabase={supabase}
+          onClose={() => setShowImport(false)}
+          onImported={() => { if (selectedProductId) loadUnitsForProduct(selectedProductId); }}
+          columns={[
+            {
+              key: 'product', dbField: 'product_id', required: true, example: 'iPhone 13 Pro',
+              // Resolves a typed product NAME to its real id, using the
+              // serialized-products list already loaded on this page —
+              // matched case-insensitively so "iphone 13 pro" still
+              // finds "iPhone 13 Pro". Only products with "Track
+              // individual units" turned on in Inventory can match at
+              // all, same as the manual add-units form above. A name
+              // that doesn't match anything resolves to null, which
+              // fails at the actual insert (a real database error,
+              // not a friendly one) — the product column must match an
+              // existing serialized product's name exactly.
+              transform: (v) => {
+                const match = products.find((p) => p.name.trim().toLowerCase() === String(v).trim().toLowerCase());
+                return match ? match.id : null;
+              },
+            },
+            {
+              key: 'supplier', dbField: 'supplier_id', example: 'Alaba Electronics Ltd',
+              // Same name-to-id resolution as product, but optional —
+              // a blank or unmatched supplier name just leaves this
+              // unit with no supplier recorded, same as leaving the
+              // supplier dropdown on "No supplier recorded" in the
+              // manual form.
+              transform: (v) => {
+                if (!String(v).trim()) return null;
+                const match = suppliers.find((s) => s.name.trim().toLowerCase() === String(v).trim().toLowerCase());
+                return match ? match.id : null;
+              },
+            },
+            { key: 'serial_number', required: true, example: 'F2LN3K9QPJ8X' },
+            { key: 'imei1', example: '356938035643809', transform: (v) => (String(v).trim() ? String(v).trim() : null) },
+            { key: 'imei2', example: '356938035643817', transform: (v) => (String(v).trim() ? String(v).trim() : null) },
+            { key: 'color', example: 'Sierra Blue', transform: (v) => (String(v).trim() ? String(v).trim() : null) },
+            { key: 'condition', example: 'new', transform: (v) => (String(v).trim() ? String(v).trim() : null) },
+            { key: 'specs', example: '256GB', transform: (v) => (String(v).trim() ? String(v).trim() : null) },
+            { key: 'cost_price', example: '450000', transform: (v) => (String(v).trim() === '' ? null : Number(v)) },
+          ]}
+        />
       )}
     </div>
   );

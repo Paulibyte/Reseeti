@@ -162,7 +162,7 @@ export default function ProductForm({ business, product, familyId, familyName, o
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'var(--overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 50 }}>
-      <div style={{ background: 'var(--surface)', borderRadius: 10, padding: 24, maxWidth: 420, width: '100%', borderTop: '5px solid var(--orange)' }}>
+      <div style={{ background: 'var(--surface)', borderRadius: 10, padding: 24, maxWidth: 420, width: '100%', maxHeight: '90vh', overflowY: 'auto', borderTop: '5px solid var(--orange)', boxSizing: 'border-box' }}>
         <h3 style={{ fontFamily: 'var(--font-heading)', color: 'var(--heading)', marginTop: 0 }}>
           {isEdit
             ? `Edit ${form.type === 'service' ? 'service' : 'product'}`
