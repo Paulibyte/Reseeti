@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { createClient } from '../../../lib/supabaseClient';
 import CameraBarcodeScanner, { isCameraScanningSupported } from '../../components/CameraBarcodeScanner';
 import { queueEdit } from '../../../lib/offlineQueue';
+import { getMaxImageUploadMb, getMaxImageUploadBytes } from '../../../lib/maxUploadSize';
 
 export default function ProductForm({ business, product, familyId, familyName, onClose, onSaved }) {
   const supabase = createClient();
@@ -36,12 +37,18 @@ export default function ProductForm({ business, product, familyId, familyName, o
   const [photoPreview, setPhotoPreview] = useState(product?.photo_url || '');
   const [removePhoto, setRemovePhoto] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  // Displayed in the hint text below the photo field — fetched once on
+  // mount so what's shown always matches the real, current admin
+  // setting rather than a stale hardcoded number.
+  const [maxUploadMb, setMaxUploadMb] = useState(2);
+  useEffect(() => { getMaxImageUploadMb().then(setMaxUploadMb); }, []);
 
-  function handlePhotoChange(e) {
+  async function handlePhotoChange(e) {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) {
-      setError('Photo must be under 2MB.');
+    const maxBytes = await getMaxImageUploadBytes();
+    if (file.size > maxBytes) {
+      setError(`Photo must be under ${await getMaxImageUploadMb()}MB.`);
       return;
     }
     setPhotoFile(file);
@@ -224,7 +231,7 @@ export default function ProductForm({ business, product, familyId, familyName, o
                 )}
               </div>
               <p style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: -2, marginBottom: 14 }}>
-                Shown on the public catalogue if this product is set to "Show in online catalogue" below. Under 2MB.
+                Shown on the public catalogue if this product is set to "Show in online catalogue" below. Under {maxUploadMb}MB.
               </p>
             </>
           )}

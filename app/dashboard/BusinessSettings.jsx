@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { createClient } from '../../lib/supabaseClient';
 import AppVersion from './AppVersion';
 import { csrfFetch } from '../../lib/csrfFetch';
+import { getMaxImageUploadMb, getMaxImageUploadBytes } from '../../lib/maxUploadSize';
 
 export default function BusinessSettings({ business, onSaved, onClose }) {
   const supabase = createClient();
@@ -21,6 +22,10 @@ export default function BusinessSettings({ business, onSaved, onClose }) {
   const [enablingPayments, setEnablingPayments] = useState(false);
   const [enablePaymentsError, setEnablePaymentsError] = useState('');
   const [enablePaymentsSuccess, setEnablePaymentsSuccess] = useState('');
+  // Displayed in the hint text under both the logo and signature
+  // upload fields — fetched once so what's shown matches the real,
+  // current admin setting rather than a stale hardcoded number.
+  const [maxUploadMb, setMaxUploadMb] = useState(2);
 
   useEffect(() => {
     if (business.plan !== 'pro') return;
@@ -32,6 +37,8 @@ export default function BusinessSettings({ business, onSaved, onClose }) {
       }
     })();
   }, []);
+
+  useEffect(() => { getMaxImageUploadMb().then(setMaxUploadMb); }, []);
 
   async function enableOnlinePayments() {
     setEnablingPayments(true);
@@ -111,8 +118,9 @@ export default function BusinessSettings({ business, onSaved, onClose }) {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 2 * 1024 * 1024) {
-      setError('Logo must be under 2MB.');
+    const maxBytes = await getMaxImageUploadBytes();
+    if (file.size > maxBytes) {
+      setError(`Logo must be under ${await getMaxImageUploadMb()}MB.`);
       return;
     }
 
@@ -150,8 +158,9 @@ export default function BusinessSettings({ business, onSaved, onClose }) {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 2 * 1024 * 1024) {
-      setError('Signature image must be under 2MB.');
+    const maxBytes = await getMaxImageUploadBytes();
+    if (file.size > maxBytes) {
+      setError(`Signature image must be under ${await getMaxImageUploadMb()}MB.`);
       return;
     }
 
@@ -259,7 +268,7 @@ export default function BusinessSettings({ business, onSaved, onClose }) {
             {uploading ? 'Uploading…' : logoUrl ? 'Change logo' : 'Upload logo'}
             <input type="file" accept="image/*" onChange={handleLogoUpload} disabled={uploading} style={{ display: 'none' }} />
           </label>
-          <p style={{ fontSize: 11, color: 'var(--text-faint)', margin: '6px 0 0' }}>PNG or JPG, under 2MB. Shows on shared invoices.</p>
+          <p style={{ fontSize: 11, color: 'var(--text-faint)', margin: '6px 0 0' }}>PNG or JPG, under {maxUploadMb}MB. Shows on shared invoices.</p>
         </div>
       </div>
 

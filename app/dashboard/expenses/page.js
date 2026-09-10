@@ -8,6 +8,7 @@ import { getMyBusiness } from '../../../lib/getMyBusiness';
 import DashboardShell from '../DashboardShell';
 import { can } from '../../../lib/permissions';
 import { formatNaira } from '../../../lib/format';
+import { getMaxImageUploadBytes, getMaxImageUploadMb } from '../../../lib/maxUploadSize';
 import { csrfFetch } from '../../../lib/csrfFetch';
 
 // Code splitting: UpgradeModal only renders for free-plan businesses at
@@ -248,8 +249,8 @@ function ExpenseForm({ business, expense, onClose, onSaved }) {
       setError('Upload a JPEG, PNG, or WebP photo of the receipt.');
       return;
     }
-    if (file.size > 5 * 1024 * 1024) {
-      setError('That photo is too large — try a smaller image or a tighter crop of the receipt.');
+    if (file.size > (await getMaxImageUploadBytes())) {
+      setError(`That photo is too large — try a smaller image or a tighter crop of the receipt (max ${await getMaxImageUploadMb()}MB).`);
       return;
     }
 

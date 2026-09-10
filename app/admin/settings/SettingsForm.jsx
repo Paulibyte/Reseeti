@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 export default function SettingsForm({ settings }) {
   const router = useRouter();
   const [limit, setLimit] = useState(settings?.free_plan_invoice_limit ?? 5);
+  const [maxUploadMb, setMaxUploadMb] = useState(settings?.max_image_upload_mb ?? 2);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
@@ -18,7 +19,7 @@ export default function SettingsForm({ settings }) {
       const res = await fetch('/api/admin/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ free_plan_invoice_limit: Number(limit) }),
+        body: JSON.stringify({ free_plan_invoice_limit: Number(limit), max_image_upload_mb: Number(maxUploadMb) }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { setError(data.error || `Could not save (server said: ${res.status})`); return; }
@@ -46,6 +47,22 @@ export default function SettingsForm({ settings }) {
       <p style={{ fontSize: 12, color: 'var(--text-faint)', margin: '0 0 14px' }}>
         Applies to every business on the Free plan, except ones with their own custom limit set individually.
       </p>
+
+      <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
+        Maximum image upload size (MB)
+      </label>
+      <input
+        type="number"
+        min={1}
+        max={50}
+        value={maxUploadMb}
+        onChange={(e) => setMaxUploadMb(e.target.value)}
+        style={{ width: '100%', padding: '9px 11px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 14, marginBottom: 6, boxSizing: 'border-box', background: 'var(--bg)', color: 'var(--text)' }}
+      />
+      <p style={{ fontSize: 12, color: 'var(--text-faint)', margin: '0 0 14px' }}>
+        Applies to every image upload across the app — product photos, business logo, signature, and the AI receipt scanner. Between 1 and 50 MB.
+      </p>
+
       {error && <p style={{ color: 'var(--danger)', fontSize: 13 }}>{error}</p>}
       <button
         onClick={save}
