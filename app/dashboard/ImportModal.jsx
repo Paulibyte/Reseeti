@@ -52,23 +52,43 @@ export default function ImportModal({ title, columns, table, business, supabase,
     setImporting(true);
     setError('');
     const validRows = validation.filter((v) => v.valid).map((v) => v.row);
-    const payloads = validRows.map((row) => columns.reduce((acc, c) => {
-      acc[c.dbField || c.key] = c.transform ? c.transform(row[c.key]) : (row[c.key] || null);
-      return acc;
-    }, { business_id: business.id }));
+    const payloads = validRows.map((row) => ({
+      payload: columns.reduce((acc, c) => {
+        acc[c.dbField || c.key] = c.transform ? c.transform(row[c.key]) : (row[c.key] || null);
+        return acc;
+      }, { business_id: business.id }),
+      // Kept alongside the payload purely so a failed row can be
+      // reported back using something the person actually recognizes
+      // from their own file, not the raw database payload.
+      sourceRow: row,
+    }));
 
     let inserted = 0;
     const errors = [];
-    // Inserted in small batches rather than one giant insert — a single
-    // bad row (e.g. a duplicate barcode tripping the unique constraint)
-    // fails only its own batch, not the whole import, and batching keeps
-    // each request a reasonable size.
+    // Inserted in small batches rather than one giant insert — keeps
+    // each request a reasonable size. A batch insert is atomic though:
+    // one bad row in it (e.g. referencing something that doesn't exist)
+    // fails the WHOLE batch, silently taking every other good row in it
+    // down too. The per-row fallback below only ever runs when a batch
+    // has already failed — a fully successful import never pays the
+    // extra cost of inserting one row at a time at all.
     const BATCH_SIZE = 50;
     for (let i = 0; i < payloads.length; i += BATCH_SIZE) {
       const batch = payloads.slice(i, i + BATCH_SIZE);
-      const { error: err, count } = await supabase.from(table).insert(batch, { count: 'exact' });
-      if (err) errors.push(err.message);
-      else inserted += count || batch.length;
+      const { error: err, count } = await supabase.from(table).insert(batch.map((b) => b.payload), { count: 'exact' });
+      if (!err) {
+        inserted += count || batch.length;
+        continue;
+      }
+      for (const item of batch) {
+        const { error: rowErr } = await supabase.from(table).insert(item.payload);
+        if (rowErr) {
+          const label = item.sourceRow[columns[0].key] || 'a row';
+          errors.push(`${label}: ${rowErr.message}`);
+        } else {
+          inserted += 1;
+        }
+      }
     }
 
     setImporting(false);
@@ -88,7 +108,17 @@ export default function ImportModal({ title, columns, table, business, supabase,
               {result.skipped > 0 && ` Skipped ${result.skipped} row${result.skipped === 1 ? '' : 's'} missing required fields.`}
             </p>
             {result.errors.length > 0 && (
-              <p style={{ fontSize: 12.5, color: 'var(--danger)' }}>{result.errors.join('; ')}</p>
+              <div style={{ marginBottom: 10 }}>
+                <p style={{ fontSize: 12.5, color: 'var(--danger)', fontWeight: 700, margin: '0 0 4px' }}>
+                  {result.errors.length} row{result.errors.length === 1 ? '' : 's'} couldn't be saved:
+                </p>
+                {result.errors.slice(0, 10).map((msg, i) => (
+                  <p key={i} style={{ fontSize: 12, color: 'var(--danger)', margin: '0 0 2px' }}>{msg}</p>
+                ))}
+                {result.errors.length > 10 && (
+                  <p style={{ fontSize: 11.5, color: 'var(--text-faint)', margin: '4px 0 0' }}>…and {result.errors.length - 10} more.</p>
+                )}
+              </div>
             )}
             <button onClick={onClose} style={primaryBtnStyle}>Done</button>
           </>
