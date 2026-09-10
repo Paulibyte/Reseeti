@@ -11,6 +11,7 @@ export default function ProductForm({ business, product, familyId, familyName, o
   const [form, setForm] = useState({
     type: product?.type || 'product',
     name: product?.name || familyName || '',
+    description: product?.description || '',
     barcode: product?.barcode || '',
     category: product?.category || '',
     price: product?.price ?? '',
@@ -67,6 +68,7 @@ export default function ProductForm({ business, product, familyId, familyName, o
       business_id: business.id,
       type: form.type,
       name: form.name,
+      description: form.description.trim() || null,
       barcode: form.barcode || null,
       category: form.category || null,
       price: Number(form.price) || 0,
@@ -190,6 +192,15 @@ export default function ProductForm({ business, product, familyId, familyName, o
           )}
           <label style={labelStyle}>{form.type === 'service' ? 'Service name' : 'Product name'}</label>
           <input required value={form.name} onChange={(e) => set('name', e.target.value)} style={inputStyle} placeholder={form.type === 'service' ? 'e.g. Consultation Fee' : 'e.g. Bag of Rice'} />
+
+          <label style={labelStyle}>Short description (optional)</label>
+          <textarea
+            value={form.description}
+            onChange={(e) => set('description', e.target.value)}
+            rows={2}
+            style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }}
+            placeholder="Shown when a customer taps this item in your online catalogue"
+          />
 
           {business.plan === 'pro' && (
             <>

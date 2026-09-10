@@ -20,6 +20,8 @@ function toWhatsAppDigits(input) {
 export default function ShopCart({ slug, businessName, businessAddress, whatsappNumber, canPayOnline, logoUrl, accentColor, products }) {
   const accent = accentColor || '#d97a2b';
   const [cart, setCart] = useState({}); // product_id -> qty
+  const [view, setView] = useState('grid');
+  const [detailProduct, setDetailProduct] = useState(null);
   const [showPhonePrompt, setShowPhonePrompt] = useState(false);
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerName, setCustomerName] = useState('');
@@ -159,6 +161,27 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
         <p style={{ margin: '10px 0 0', fontSize: 12.5, color: '#8a8175' }}>Pick what you need, then order below.</p>
       </header>
 
+      {products.length > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '12px 16px 0' }}>
+          <div style={{ display: 'flex', border: '1px solid #e6ddd0', borderRadius: 8, overflow: 'hidden' }}>
+            <button
+              onClick={() => setView('grid')}
+              aria-label="Grid view"
+              style={{ padding: '6px 10px', border: 'none', cursor: 'pointer', fontSize: 14, background: view === 'grid' ? accent : '#fff', color: view === 'grid' ? '#fff' : '#8a8175' }}
+            >
+              ▦
+            </button>
+            <button
+              onClick={() => setView('list')}
+              aria-label="List view"
+              style={{ padding: '6px 10px', border: 'none', cursor: 'pointer', fontSize: 14, background: view === 'list' ? accent : '#fff', color: view === 'list' ? '#fff' : '#8a8175' }}
+            >
+              ☰
+            </button>
+          </div>
+        </div>
+      )}
+
       <div style={{ padding: '16px 16px 0' }}>
         {products.length === 0 && (
           <p style={{ textAlign: 'center', color: '#8a8175', fontSize: 14, marginTop: 40 }}>Nothing in the catalogue yet — check back soon.</p>
@@ -169,62 +192,174 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
             <h2 style={{ fontSize: 12.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: '#8a8175', margin: '0 0 8px 4px' }}>
               {category}
             </h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {items.map((p) => {
-                // Services (Stage 49) carry no real stock — always
-                // available, never shown as out of stock.
-                const outOfStock = p.type !== 'service' && Number(p.stock_qty) <= 0;
-                const qty = cart[p.id] || 0;
-                const sizeLabel = p.unit_value ? `${p.unit_value}${p.unit || ''}` : (p.unit || null);
-                return (
-                  <div
-                    key={p.id}
-                    style={{
-                      display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
-                      padding: '12px 14px', background: '#fff', border: '1px solid #e6ddd0', borderRadius: 10,
-                      opacity: outOfStock ? 0.55 : 1,
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-                      {p.photo_url ? (
-                        <img src={p.photo_url} alt="" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 8, flexShrink: 0 }} />
-                      ) : (
-                        <div style={{ width: 48, height: 48, borderRadius: 8, background: '#f5f0e8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>
-                          🛍️
+
+            {view === 'grid' ? (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+                {items.map((p) => {
+                  const outOfStock = p.type !== 'service' && Number(p.stock_qty) <= 0;
+                  const qty = cart[p.id] || 0;
+                  const sizeLabel = p.unit_value ? `${p.unit_value}${p.unit || ''}` : (p.unit || null);
+                  return (
+                    <div key={p.id} style={{ background: '#fff', border: '1px solid #e6ddd0', borderRadius: 10, overflow: 'hidden', opacity: outOfStock ? 0.55 : 1 }}>
+                      <button
+                        onClick={() => setDetailProduct(p)}
+                        style={{ display: 'block', width: '100%', border: 'none', background: 'none', padding: 0, cursor: 'pointer', textAlign: 'left' }}
+                      >
+                        {p.photo_url ? (
+                          <img src={p.photo_url} alt="" style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', display: 'block' }} />
+                        ) : (
+                          <div style={{ width: '100%', aspectRatio: '1 / 1', background: '#f5f0e8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28 }}>
+                            🛍️
+                          </div>
+                        )}
+                        <div style={{ padding: '8px 10px 4px' }}>
+                          <p style={{ margin: 0, fontWeight: 700, fontSize: 13.5, color: '#1a2a4a', lineHeight: 1.3 }}>
+                            {p.name}{sizeLabel ? ` (${sizeLabel})` : ''}
+                          </p>
+                          <p style={{ margin: '2px 0 0', fontSize: 12.5, color: '#8a8175' }}>
+                            {formatNaira(p.price)}{outOfStock ? ' · Out of stock' : ''}
+                          </p>
+                        </div>
+                      </button>
+                      {!outOfStock && (
+                        <div style={{ padding: '4px 10px 10px' }}>
+                          {qty === 0 ? (
+                            <button
+                              onClick={() => setQty(p.id, 1)}
+                              style={{ width: '100%', background: accent, color: '#fff', border: 'none', borderRadius: 8, padding: '7px', fontWeight: 700, fontSize: 12.5, cursor: 'pointer' }}
+                            >
+                              Add
+                            </button>
+                          ) : (
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+                              <button onClick={() => setQty(p.id, qty - 1)} style={stepperBtn}>−</button>
+                              <span style={{ minWidth: 18, textAlign: 'center', fontWeight: 700 }}>{qty}</span>
+                              <button onClick={() => setQty(p.id, qty + 1)} style={stepperBtn}>+</button>
+                            </div>
+                          )}
                         </div>
                       )}
-                      <div>
-                        <p style={{ margin: 0, fontWeight: 700, fontSize: 14.5, color: '#1a2a4a' }}>
-                          {p.name}{sizeLabel ? ` (${sizeLabel})` : ''}
-                        </p>
-                        <p style={{ margin: '2px 0 0', fontSize: 13, color: '#8a8175' }}>
-                          {formatNaira(p.price)}{outOfStock ? ' · Out of stock' : ''}
-                        </p>
-                      </div>
                     </div>
-                    {!outOfStock && (
-                      qty === 0 ? (
-                        <button
-                          onClick={() => setQty(p.id, 1)}
-                          style={{ background: accent, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 700, fontSize: 13, cursor: 'pointer', flexShrink: 0 }}
-                        >
-                          Add
-                        </button>
-                      ) : (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-                          <button onClick={() => setQty(p.id, qty - 1)} style={stepperBtn}>−</button>
-                          <span style={{ minWidth: 18, textAlign: 'center', fontWeight: 700 }}>{qty}</span>
-                          <button onClick={() => setQty(p.id, qty + 1)} style={stepperBtn}>+</button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {items.map((p) => {
+                  // Services (Stage 49) carry no real stock — always
+                  // available, never shown as out of stock.
+                  const outOfStock = p.type !== 'service' && Number(p.stock_qty) <= 0;
+                  const qty = cart[p.id] || 0;
+                  const sizeLabel = p.unit_value ? `${p.unit_value}${p.unit || ''}` : (p.unit || null);
+                  return (
+                    <div
+                      key={p.id}
+                      style={{
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
+                        padding: '12px 14px', background: '#fff', border: '1px solid #e6ddd0', borderRadius: 10,
+                        opacity: outOfStock ? 0.55 : 1,
+                      }}
+                    >
+                      <button
+                        onClick={() => setDetailProduct(p)}
+                        style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, border: 'none', background: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', flex: 1 }}
+                      >
+                        {p.photo_url ? (
+                          <img src={p.photo_url} alt="" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 8, flexShrink: 0 }} />
+                        ) : (
+                          <div style={{ width: 48, height: 48, borderRadius: 8, background: '#f5f0e8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>
+                            🛍️
+                          </div>
+                        )}
+                        <div>
+                          <p style={{ margin: 0, fontWeight: 700, fontSize: 14.5, color: '#1a2a4a' }}>
+                            {p.name}{sizeLabel ? ` (${sizeLabel})` : ''}
+                          </p>
+                          <p style={{ margin: '2px 0 0', fontSize: 13, color: '#8a8175' }}>
+                            {formatNaira(p.price)}{outOfStock ? ' · Out of stock' : ''}
+                          </p>
                         </div>
-                      )
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+                      </button>
+                      {!outOfStock && (
+                        qty === 0 ? (
+                          <button
+                            onClick={() => setQty(p.id, 1)}
+                            style={{ background: accent, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 700, fontSize: 13, cursor: 'pointer', flexShrink: 0 }}
+                          >
+                            Add
+                          </button>
+                        ) : (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+                            <button onClick={() => setQty(p.id, qty - 1)} style={stepperBtn}>−</button>
+                            <span style={{ minWidth: 18, textAlign: 'center', fontWeight: 700 }}>{qty}</span>
+                            <button onClick={() => setQty(p.id, qty + 1)} style={stepperBtn}>+</button>
+                          </div>
+                        )
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         ))}
       </div>
+
+      {detailProduct && (() => {
+        const p = detailProduct;
+        const outOfStock = p.type !== 'service' && Number(p.stock_qty) <= 0;
+        const qty = cart[p.id] || 0;
+        const sizeLabel = p.unit_value ? `${p.unit_value}${p.unit || ''}` : (p.unit || null);
+        return (
+          <div
+            onClick={() => setDetailProduct(null)}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(26,42,74,0.5)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 80 }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{ background: '#fff', borderRadius: '16px 16px 0 0', maxWidth: 480, width: '100%', maxHeight: '85vh', overflowY: 'auto' }}
+            >
+              {p.photo_url ? (
+                <img src={p.photo_url} alt="" style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', display: 'block' }} />
+              ) : (
+                <div style={{ width: '100%', aspectRatio: '1 / 1', background: '#f5f0e8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 48 }}>
+                  🛍️
+                </div>
+              )}
+              <div style={{ padding: 20 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 6 }}>
+                  <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: '#1a2a4a' }}>
+                    {p.name}{sizeLabel ? ` (${sizeLabel})` : ''}
+                  </h3>
+                  <button onClick={() => setDetailProduct(null)} style={{ background: 'none', border: 'none', color: '#8a8175', fontSize: 22, cursor: 'pointer', lineHeight: 1, flexShrink: 0 }}>×</button>
+                </div>
+                <p style={{ margin: '0 0 10px', fontSize: 16, fontWeight: 700, color: accent }}>
+                  {formatNaira(p.price)}{outOfStock ? ' · Out of stock' : ''}
+                </p>
+                {p.description && (
+                  <p style={{ margin: '0 0 16px', fontSize: 13.5, color: '#5a5248', lineHeight: 1.6 }}>{p.description}</p>
+                )}
+                {!outOfStock && (
+                  qty === 0 ? (
+                    <button
+                      onClick={() => setQty(p.id, 1)}
+                      style={{ width: '100%', background: accent, color: '#fff', border: 'none', borderRadius: 10, padding: '13px', fontWeight: 700, fontSize: 14.5, cursor: 'pointer' }}
+                    >
+                      Add to order
+                    </button>
+                  ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+                      <button onClick={() => setQty(p.id, qty - 1)} style={stepperBtn}>−</button>
+                      <span style={{ minWidth: 24, textAlign: 'center', fontWeight: 700, fontSize: 16 }}>{qty}</span>
+                      <button onClick={() => setQty(p.id, qty + 1)} style={stepperBtn}>+</button>
+                    </div>
+                  )
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {itemCount > 0 && (
         <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: '#fff', borderTop: '1px solid #e6ddd0', padding: '12px 16px', boxShadow: '0 -4px 16px rgba(0,0,0,0.06)' }}>
