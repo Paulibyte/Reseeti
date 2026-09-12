@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '../../../lib/supabaseClient';
 import { getMyBusiness } from '../../../lib/getMyBusiness';
 import DashboardShell from '../DashboardShell';
+import EditDeviceUnitModal from './EditDeviceUnitModal';
 
 const ImportModal = dynamic(() => import('../ImportModal'), { ssr: false });
 
@@ -92,6 +93,24 @@ export default function DeviceUnitsPage() {
 
   function addRow() { setRows([...rows, blankUnit()]); }
   function removeRow(idx) { setRows(rows.filter((_, i) => i !== idx)); }
+
+  const [editingUnit, setEditingUnit] = useState(null);
+
+  // Blocked for sold units on purpose — deleting one would destroy the
+  // exact record (which customer, which invoice) that the Serial/IMEI
+  // Lookup tool exists to preserve. An unsold unit is just a stock
+  // record with nothing tying it to a real transaction yet, so
+  // removing a genuine data-entry mistake there is safe.
+  async function deleteUnit(unit, sold) {
+    if (sold) return;
+    if (!confirm(`Delete unit ${unit.serial_number}? This cannot be undone.`)) return;
+    const { error: dbError } = await supabase.from('device_units').delete().eq('id', unit.id);
+    if (dbError) {
+      alert(dbError.message);
+      return;
+    }
+    loadUnitsForProduct(selectedProductId);
+  }
 
   async function save() {
     setError('');
@@ -219,17 +238,27 @@ export default function DeviceUnitsPage() {
                   {existingUnits.map((u) => {
                     const sold = !!u.invoice_items?.length;
                     return (
-                      <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, padding: '8px 12px', fontSize: 12.5 }}>
+                      <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, padding: '8px 12px', fontSize: 12.5, gap: 10 }}>
                         <span style={{ color: 'var(--text)' }}>
                           {u.serial_number}{u.color ? ` · ${u.color}` : ''}{u.condition ? ` · ${u.condition}` : ''}
                           {u.suppliers?.name ? ` · from ${u.suppliers.name}` : ''}
                         </span>
-                        <span style={{
-                          fontSize: 10.5, fontWeight: 700, padding: '2px 8px', borderRadius: 10, textTransform: 'uppercase',
-                          background: sold ? 'var(--success-bg)' : 'var(--orange-bg)', color: sold ? 'var(--success)' : 'var(--orange-dark)',
-                        }}>
-                          {sold ? `Sold${u.invoice_items[0]?.invoices?.customer_name ? ` — ${u.invoice_items[0].invoices.customer_name}` : ''}` : 'In stock'}
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+                          <span style={{
+                            fontSize: 10.5, fontWeight: 700, padding: '2px 8px', borderRadius: 10, textTransform: 'uppercase',
+                            background: sold ? 'var(--success-bg)' : 'var(--orange-bg)', color: sold ? 'var(--success)' : 'var(--orange-dark)',
+                          }}>
+                            {sold ? `Sold${u.invoice_items[0]?.invoices?.customer_name ? ` — ${u.invoice_items[0].invoices.customer_name}` : ''}` : 'In stock'}
+                          </span>
+                          <button onClick={() => setEditingUnit(u)} style={{ background: 'none', border: 'none', color: 'var(--orange)', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+                            Edit
+                          </button>
+                          {!sold && (
+                            <button onClick={() => deleteUnit(u, sold)} style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+                              Delete
+                            </button>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
@@ -238,6 +267,15 @@ export default function DeviceUnitsPage() {
             </>
           )}
         </>
+      )}
+
+      {editingUnit && (
+        <EditDeviceUnitModal
+          unit={editingUnit}
+          suppliers={suppliers}
+          onClose={() => setEditingUnit(null)}
+          onSaved={() => { setEditingUnit(null); loadUnitsForProduct(selectedProductId); }}
+        />
       )}
 
       {showImport && (

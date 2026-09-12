@@ -111,7 +111,20 @@ export default function InventoryPage() {
 
   async function deleteProduct(product) {
     if (!confirm(`Remove "${product.name}" from inventory? This won't affect past invoices.`)) return;
-    await supabase.from('products').delete().eq('id', product.id);
+    const { error: dbError } = await supabase.from('products').delete().eq('id', product.id);
+    if (dbError) {
+      // 23503 = foreign key violation — the database correctly refusing
+      // because device_units still reference this product (serial/IMEI
+      // records for it exist). Previously this failed completely
+      // silently: no error was ever checked, so the dialog just closed
+      // and the product stayed put with no explanation at all.
+      if (dbError.code === '23503') {
+        alert(`Can't delete "${product.name}" — it still has device units (serial numbers/IMEIs) recorded against it. Delete or reassign those from the Device Units page first, then try again.`);
+      } else {
+        alert(dbError.message || 'Could not delete this product.');
+      }
+      return;
+    }
     load();
   }
 
