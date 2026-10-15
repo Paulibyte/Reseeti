@@ -51,14 +51,19 @@ export default function DeviceLookupPage() {
     // instead of a false "not found."
     const { data } = await supabase
       .from('device_units')
-      .select('*, products(name), suppliers(name, address, supplier_contacts(name, phone, role)), invoice_items(invoices(invoice_number, customer_name, customer_phone, created_at))')
+      .select('*, products(name), suppliers(name, address, supplier_contacts(name, phone, role)), invoice_items(invoices(invoice_number, customer_name, customer_phone, created_at, voided_at))')
       .or(`serial_number.eq.${term},imei1.eq.${term},imei2.eq.${term}`)
       .limit(1);
     setResult(data?.[0] || null);
     setSearching(false);
   }
 
-  const sale = result?.invoice_items?.[0]?.invoices;
+  // The CURRENT sale is the one on a non-voided invoice. Voided sales
+  // are kept and listed separately — that history is exactly what this
+  // tool exists to preserve.
+  const allSales = (result?.invoice_items || []).map((ii) => ii.invoices).filter(Boolean);
+  const sale = allSales.find((inv) => !inv.voided_at);
+  const voidedSales = allSales.filter((inv) => inv.voided_at);
 
   if (loading || !business) {
     return <main style={{ padding: 40, color: 'var(--text-muted)' }}>Loading…</main>;
@@ -139,7 +144,14 @@ export default function DeviceLookupPage() {
               </div>
             ) : (
               <div style={{ background: 'var(--orange-bg)', borderRadius: 6, padding: '10px 12px' }}>
-                <p style={{ margin: 0, fontSize: 13.5, fontWeight: 700, color: 'var(--orange-dark)' }}>Still in stock — not yet sold</p>
+                <p style={{ margin: 0, fontSize: 13.5, fontWeight: 700, color: 'var(--orange-dark)' }}>
+                  {voidedSales.length ? 'In stock — available to sell again' : 'Still in stock — not yet sold'}
+                </p>
+                {voidedSales.map((v, i) => (
+                  <p key={i} style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
+                    Earlier sold on invoice {v.invoice_number}{v.customer_name ? ` to ${v.customer_name}` : ''} — that sale was voided.
+                  </p>
+                ))}
               </div>
             )}
           </div>

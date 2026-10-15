@@ -17,7 +17,7 @@ const OVERSCAN_PX = 600;
 // invoices, not to duplicate everything the receipt page shows. No
 // invoice_items join here at all (unlike the old dashboard query), since
 // nothing in this row needs line items.
-const SELECT_COLUMNS = 'id, invoice_number, customer_name, customer_phone, total, paid, last_reminded_at, created_at, due_date';
+const SELECT_COLUMNS = 'id, invoice_number, customer_name, customer_phone, total, paid, last_reminded_at, created_at, due_date, voided_at, void_reason';
 
 export default function VirtualInvoiceList({
   supabase,
@@ -27,6 +27,7 @@ export default function VirtualInvoiceList({
   refreshToken,
   onTogglePaid,
   onDelete,
+  onVoid,
   onRemind,
   reminding,
 }) {
@@ -145,6 +146,7 @@ export default function VirtualInvoiceList({
           reminding={reminding}
           onTogglePaid={onTogglePaid}
           onDelete={onDelete}
+          onVoid={onVoid}
           onRemind={onRemind}
         />
       ))}
@@ -169,22 +171,24 @@ export default function VirtualInvoiceList({
 // standalone function rather than inline in the JSX below since it's
 // checked in two places within the row.
 function isOverdue(inv) {
-  if (inv.paid || !inv.due_date) return false;
+  if (inv.voided_at || inv.paid || !inv.due_date) return false;
   return new Date(inv.due_date) < new Date(new Date().toDateString());
 }
 
-function InvoiceRow({ inv, isLast, role, overrides, reminding, onTogglePaid, onDelete, onRemind }) {
+function InvoiceRow({ inv, isLast, role, overrides, reminding, onTogglePaid, onDelete, onVoid, onRemind }) {
+  const voided = !!inv.voided_at;
   return (
     <div
       style={{
         display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8,
         padding: '12px 16px', borderBottom: isLast ? 'none' : '1px solid var(--border)',
         minHeight: 58, boxSizing: 'border-box',
+        opacity: voided ? 0.6 : 1,
       }}
     >
       <span style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--heading)' }}>{inv.invoice_number}</span>
       <span style={{ color: 'var(--text)' }}>{inv.customer_name}</span>
-      <span style={{ fontWeight: 700, color: 'var(--text)' }}>{formatNaira(inv.total)}</span>
+      <span style={{ fontWeight: 700, color: 'var(--text)', textDecoration: voided ? 'line-through' : 'none' }}>{formatNaira(inv.total)}</span>
       {isOverdue(inv) && (
         <span
           title={`Payment was due ${new Date(inv.due_date).toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' })}`}
@@ -201,7 +205,7 @@ function InvoiceRow({ inv, isLast, role, overrides, reminding, onTogglePaid, onD
       >
         Share
       </a>
-      {!inv.paid && (
+      {!voided && !inv.paid && (
         <button
           onClick={() => onRemind(inv)}
           disabled={reminding === inv.id}
@@ -211,6 +215,14 @@ function InvoiceRow({ inv, isLast, role, overrides, reminding, onTogglePaid, onD
           {reminding === inv.id ? 'Opening…' : 'Remind'}
         </button>
       )}
+      {voided ? (
+        <span
+          title={`Voided${inv.void_reason ? ` — ${inv.void_reason}` : ''}`}
+          style={{ fontSize: 11, padding: '4px 10px', borderRadius: 12, background: 'var(--border)', color: 'var(--text-faint)', fontWeight: 700 }}
+        >
+          VOID
+        </span>
+      ) : (
       <button
         onClick={() => onTogglePaid(inv)}
         disabled={!can(role, 'markInvoicePaid', overrides)}
@@ -227,7 +239,17 @@ function InvoiceRow({ inv, isLast, role, overrides, reminding, onTogglePaid, onD
       >
         {inv.paid ? 'PAID' : 'UNPAID'}
       </button>
-      {can(role, 'deleteInvoice', overrides) && (
+      )}
+      {!voided && can(role, 'voidInvoice', overrides) && (
+        <button
+          onClick={() => onVoid(inv)}
+          title="Void invoice"
+          style={{ fontSize: 12, background: 'none', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '4px 9px', cursor: 'pointer', fontWeight: 600 }}
+        >
+          Void
+        </button>
+      )}
+      {!voided && can(role, 'deleteInvoice', overrides) && (
         <button
           onClick={() => onDelete(inv)}
           title="Delete invoice"

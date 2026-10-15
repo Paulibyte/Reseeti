@@ -148,13 +148,13 @@ export default function ReceiptClient({ invoice, business, signature, offlineMod
   // standard, since none is integrated here — this is a convenience
   // scan-to-read, not scan-to-pay).
   useEffect(() => {
-    if (invoice.paid || !hasBankDetails) return;
+    if (invoice.paid || invoice.voided_at || !hasBankDetails) return;
     (async () => {
       const payload = `Bank Transfer\nBank: ${business.bank_name}\nAccount Name: ${business.bank_account_name}\nAccount Number: ${business.bank_account_number}\nAmount: NGN ${Number(invoice.total).toLocaleString()}\nReference: ${invoice.invoice_number}`;
       const dataUrl = await QRCode.toDataURL(payload, { margin: 1, width: 110, color: { dark: '#1E3A5F', light: '#00000000' } });
       setBankQrDataUrl(dataUrl);
     })();
-  }, [invoice.paid, hasBankDetails, business, invoice.total, invoice.invoice_number]);
+  }, [invoice.paid, invoice.voided_at, hasBankDetails, business, invoice.total, invoice.invoice_number]);
 
   // Barcode encoding the invoice number — mainly a familiar "this is a
   // real receipt" visual convention (like POS till receipts), not read by
@@ -280,7 +280,19 @@ export default function ReceiptClient({ invoice, business, signature, offlineMod
         </div>
 
         <div style={{ position: 'relative', zIndex: 1 }}>
-          {invoice.paid && (
+          {invoice.voided_at && (
+            <div
+              style={{
+                position: 'absolute', top: -4, right: 0, width: 88, height: 88, borderRadius: '50%',
+                border: '3px double var(--danger)', color: 'var(--danger)', display: 'flex', alignItems: 'center',
+                justifyContent: 'center', fontFamily: 'var(--font-heading)', fontWeight: 700, fontSize: 17,
+                transform: 'rotate(-14deg)', opacity: 0.9, textAlign: 'center', lineHeight: 1.1, letterSpacing: 1,
+              }}
+            >
+              VOID
+            </div>
+          )}
+          {invoice.paid && !invoice.voided_at && (
             <div
               style={{
                 position: 'absolute', top: -4, right: 0, width: 88, height: 88, borderRadius: '50%',
@@ -290,6 +302,12 @@ export default function ReceiptClient({ invoice, business, signature, offlineMod
               }}
             >
               PAID
+            </div>
+          )}
+
+          {invoice.voided_at && (
+            <div style={{ background: 'var(--danger-bg)', border: '1px solid var(--danger)', color: 'var(--danger)', borderRadius: 6, padding: '8px 12px', fontSize: 12.5, fontWeight: 700, margin: '0 0 14px', paddingRight: 100 }}>
+              This invoice has been voided and is no longer valid.
             </div>
           )}
 
@@ -321,7 +339,7 @@ export default function ReceiptClient({ invoice, business, signature, offlineMod
             </div>
           )}
           {invoice.due_date && (() => {
-            const overdue = !invoice.paid && new Date(invoice.due_date) < new Date(new Date().toDateString());
+            const overdue = !invoice.paid && !invoice.voided_at && new Date(invoice.due_date) < new Date(new Date().toDateString());
             return (
               <div style={{ fontSize: 11.5, color: overdue ? 'var(--danger)' : 'var(--text-muted)', fontWeight: overdue ? 700 : 400, marginBottom: 12 }}>
                 {overdue ? '⚠ Overdue since' : 'Payment due'}: {new Date(invoice.due_date).toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' })}
@@ -422,7 +440,7 @@ export default function ReceiptClient({ invoice, business, signature, offlineMod
             )}
           </div>
 
-          {!invoice.paid && hasBankDetails && (
+          {!invoice.paid && !invoice.voided_at && hasBankDetails && (
             <div style={{ marginTop: 18, padding: '14px 16px', background: 'var(--orange-bg)', border: '1px solid var(--orange)', borderRadius: 8 }}>
               <p style={{ margin: '0 0 8px', fontWeight: 700, fontSize: 12.5, color: 'var(--orange-dark)', textTransform: 'uppercase', letterSpacing: 0.3 }}>
                 Pay via bank transfer
@@ -452,7 +470,7 @@ export default function ReceiptClient({ invoice, business, signature, offlineMod
             </div>
           )}
 
-          {!invoice.paid && business.paystack_subaccount_code && (
+          {!invoice.paid && !invoice.voided_at && business.paystack_subaccount_code && (
             <InvoiceBalancePaymentBox invoice={invoice} customerEmail={invoice.customers?.email} />
           )}
 

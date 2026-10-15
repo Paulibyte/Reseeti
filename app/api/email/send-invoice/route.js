@@ -26,12 +26,15 @@ export async function POST(request) {
   const admin = createAdminClient();
   const { data: invoice } = await admin
     .from('invoices')
-    .select('id, invoice_number, customer_name, total, business_id, verification_code')
+    .select('id, invoice_number, customer_name, total, business_id, verification_code, voided_at')
     .eq('id', invoiceId)
     .single();
 
   if (!invoice || invoice.verification_code !== verificationCode) {
     return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
+  }
+  if (invoice.voided_at) {
+    return NextResponse.json({ error: 'This invoice has been voided and can\'t be emailed.' }, { status: 400 });
   }
 
   const { data: business } = await admin

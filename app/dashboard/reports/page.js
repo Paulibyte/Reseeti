@@ -140,6 +140,7 @@ export default function ReportsPage() {
       .from('invoices')
       .select('id, invoice_number, customer_id, customer_name, customer_phone, subtotal, discount, vat_rate, vat_amount, service_charge_amount, shipping_fee, withholding_tax_rate, withholding_tax_amount, total, paid, paid_at, payment_method, created_at')
       .eq('business_id', biz.id)
+      .is('voided_at', null) // voided sales are excluded from reports and exports
       .order('created_at', { ascending: false });
     setInvoices(invs || []);
 

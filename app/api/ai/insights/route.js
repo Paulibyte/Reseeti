@@ -60,6 +60,7 @@ export async function POST() {
       .from('invoices')
       .select('total, paid, created_at, customer_name')
       .eq('business_id', membership.businessId)
+      .is('voided_at', null)
       .gte('created_at', since.toISOString()),
     admin
       .from('products')

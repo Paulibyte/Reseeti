@@ -62,6 +62,7 @@ export default function CustomerDetailPage() {
       .select('*, invoice_items(*)')
       .eq('business_id', biz.id)
       .eq('customer_id', params.id)
+      .is('voided_at', null) // statement and balance only reflect real, un-voided sales
       .order('created_at', { ascending: false });
     setInvoices(invs || []);
 

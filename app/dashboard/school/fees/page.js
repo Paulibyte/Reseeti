@@ -47,7 +47,7 @@ export default function FeesPage() {
       // invoice — a partial payment on an invoice that isn't fully
       // "paid" yet was previously invisible to that calculation
       // entirely, not partially counted. See collectionStats' comment.
-      supabase.from('invoices').select('id, student_id, term_id, total, paid, invoice_payments(amount)').eq('business_id', biz.id).not('student_id', 'is', null),
+      supabase.from('invoices').select('id, student_id, term_id, total, paid, invoice_payments(amount)').eq('business_id', biz.id).not('student_id', 'is', null).is('voided_at', null),
     ]);
     setClasses(cl || []);
     setTerms(tm || []);

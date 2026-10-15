@@ -36,6 +36,7 @@ const InvoiceForm = dynamic(() => import('./InvoiceForm'), { ssr: false });
 const BusinessSettings = dynamic(() => import('./BusinessSettings'), { ssr: false });
 const UpgradeModal = dynamic(() => import('./UpgradeModal'), { ssr: false });
 const MarkPaidModal = dynamic(() => import('./MarkPaidModal'), { ssr: false });
+const VoidInvoiceModal = dynamic(() => import('./VoidInvoiceModal'), { ssr: false });
 const SyncConflictModal = dynamic(() => import('./SyncConflictModal'), { ssr: false });
 const ParkedSalesPanel = dynamic(() => import('./ParkedSalesPanel'), { ssr: false });
 const PendingOrdersPanel = dynamic(() => import('./PendingOrdersPanel'), { ssr: false });
@@ -64,6 +65,7 @@ export default function Dashboard() {
   const [pendingOrdersCount, setPendingOrdersCount] = useState(0);
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [markingPaidInvoice, setMarkingPaidInvoice] = useState(null);
+  const [voidingInvoice, setVoidingInvoice] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [reminding, setReminding] = useState(null);
   const [isOnline, setIsOnline] = useState(true);
@@ -234,7 +236,7 @@ export default function Dashboard() {
     // VirtualInvoiceList rather than through this query at all.
     const { data: invs } = await supabase
       .from('invoices')
-      .select('id, invoice_number, customer_name, total, paid, created_at')
+      .select('id, invoice_number, customer_name, total, paid, created_at, voided_at')
       .eq('business_id', biz.id)
       .order('created_at', { ascending: false });
     setInvoices(invs || []);
@@ -394,9 +396,16 @@ export default function Dashboard() {
   const effectiveLimit = business.monthly_invoice_limit ?? platformFreeLimit;
   const atLimit = business.plan === 'free' && usedThisMonth >= effectiveLimit;
 
-  const moneyOwed = invoices.filter((i) => !i.paid).reduce((sum, i) => sum + Number(i.total), 0);
-  const moneyCollected = invoices.filter((i) => i.paid).reduce((sum, i) => sum + Number(i.total), 0);
-  const uniqueCustomers = new Set(invoices.map((i) => i.customer_name)).size;
+  // Voided invoices stay in the list (clearly marked) but never count
+  // toward money owed/collected, the customer count, or the invoice
+  // tally — a voided sale didn't happen. usedThisMonth above is
+  // deliberately NOT filtered: the free-plan limit is enforced by a
+  // database trigger that counts every invoice created, voided or not,
+  // and this meter should show the same number that trigger sees.
+  const activeInvoices = invoices.filter((i) => !i.voided_at);
+  const moneyOwed = activeInvoices.filter((i) => !i.paid).reduce((sum, i) => sum + Number(i.total), 0);
+  const moneyCollected = activeInvoices.filter((i) => i.paid).reduce((sum, i) => sum + Number(i.total), 0);
+  const uniqueCustomers = new Set(activeInvoices.map((i) => i.customer_name)).size;
 
   const firstName = (business.name || '').split(' ')[0];
   const greeting = greetingForHour(new Date().getHours());
@@ -404,7 +413,7 @@ export default function Dashboard() {
   const notifications = [];
   if (outOfStockCount > 0) notifications.push({ icon: '🚫', text: `${outOfStockCount} product${outOfStockCount === 1 ? '' : 's'} out of stock` });
   if (lowStockCount > 0) notifications.push({ icon: '⚠️', text: `${lowStockCount} product${lowStockCount === 1 ? '' : 's'} low on stock` });
-  const recentlyPaid = invoices.find((i) => i.paid);
+  const recentlyPaid = invoices.find((i) => i.paid && !i.voided_at);
   if (recentlyPaid) notifications.push({ icon: '✅', text: `Invoice ${recentlyPaid.invoice_number} paid` });
   if (business.plan === 'pro') notifications.push({ icon: '🔄', text: 'Subscription renewed' });
   notifications.push({ icon: '👀', text: 'Customer viewed invoice' });
@@ -551,7 +560,7 @@ export default function Dashboard() {
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 22 }}>
-        <StatCard label="Invoices" value={invoices.length} />
+        <StatCard label="Invoices" value={activeInvoices.length} />
         <StatCard label="Customers" value={uniqueCustomers} />
         <StatCard label="Outstanding" value={formatNaira(moneyOwed)} accent="var(--danger)" />
         <StatCard label="Collected" value={formatNaira(moneyCollected)} accent="var(--success)" />
@@ -695,6 +704,7 @@ export default function Dashboard() {
           refreshToken={invoiceRefreshToken}
           onTogglePaid={togglePaid}
           onDelete={deleteInvoiceRow}
+          onVoid={(inv) => setVoidingInvoice(inv)}
           onRemind={sendReminder}
           reminding={reminding}
         />
@@ -714,6 +724,14 @@ export default function Dashboard() {
           invoice={markingPaidInvoice}
           onConfirm={confirmMarkPaid}
           onClose={() => setMarkingPaidInvoice(null)}
+        />
+      )}
+      {voidingInvoice && (
+        <VoidInvoiceModal
+          invoice={voidingInvoice}
+          onClose={() => setVoidingInvoice(null)}
+          onChanged={() => { load(); setInvoiceRefreshToken((t) => t + 1); }}
+          onVoided={() => { setVoidingInvoice(null); load(); setInvoiceRefreshToken((t) => t + 1); }}
         />
       )}
     </DashboardShell>

@@ -27,6 +27,7 @@ async function sendRemindersForBusiness(admin, business) {
     .select('id, invoice_number, customer_name, customer_phone, total, created_at, last_reminder_sent_at')
     .eq('business_id', business.id)
     .eq('paid', false)
+    .is('voided_at', null) // never remind a customer about an invoice that was voided
     .not('customer_phone', 'is', null)
     .lte('created_at', cutoff.toISOString());
 

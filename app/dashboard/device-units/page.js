@@ -73,12 +73,15 @@ export default function DeviceUnitsPage() {
   }
 
   // Sold status is derived, not stored — a unit is sold if any
-  // invoice_items row references it (see schema_device_dealers.sql).
+  // invoice_items row references it AND that invoice hasn't been voided
+  // (see schema_device_dealers.sql, and Stage 59 for voiding). A voided
+  // sale leaves its invoice_items row in place on purpose, so the unit
+  // is sellable again but its history isn't lost.
   async function loadUnitsForProduct(productId) {
     setLoadingUnits(true);
     const { data } = await supabase
       .from('device_units')
-      .select('*, invoice_items(id, invoices(customer_name, created_at)), suppliers(name)')
+      .select('*, invoice_items(id, invoices(customer_name, created_at, voided_at)), suppliers(name)')
       .eq('product_id', productId)
       .order('created_at', { ascending: false });
     setExistingUnits(data || []);
@@ -236,7 +239,11 @@ export default function DeviceUnitsPage() {
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {existingUnits.map((u) => {
-                    const sold = !!u.invoice_items?.length;
+                    const activeSale = (u.invoice_items || []).find((ii) => !ii.invoices?.voided_at);
+                    const sold = !!activeSale;
+                    // Any invoice_items row at all — even on a voided invoice —
+                    // is a foreign key to this unit, so it can't be deleted.
+                    const hasSaleHistory = !!u.invoice_items?.length;
                     return (
                       <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, padding: '8px 12px', fontSize: 12.5, gap: 10 }}>
                         <span style={{ color: 'var(--text)' }}>
@@ -248,13 +255,13 @@ export default function DeviceUnitsPage() {
                             fontSize: 10.5, fontWeight: 700, padding: '2px 8px', borderRadius: 10, textTransform: 'uppercase',
                             background: sold ? 'var(--success-bg)' : 'var(--orange-bg)', color: sold ? 'var(--success)' : 'var(--orange-dark)',
                           }}>
-                            {sold ? `Sold${u.invoice_items[0]?.invoices?.customer_name ? ` — ${u.invoice_items[0].invoices.customer_name}` : ''}` : 'In stock'}
+                            {sold ? `Sold${activeSale.invoices?.customer_name ? ` — ${activeSale.invoices.customer_name}` : ''}` : hasSaleHistory ? 'In stock (earlier sale voided)' : 'In stock'}
                           </span>
                           <button onClick={() => setEditingUnit(u)} style={{ background: 'none', border: 'none', color: 'var(--orange)', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
                             Edit
                           </button>
-                          {!sold && (
-                            <button onClick={() => deleteUnit(u, sold)} style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+                          {!hasSaleHistory && (
+                            <button onClick={() => deleteUnit(u, hasSaleHistory)} style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
                               Delete
                             </button>
                           )}

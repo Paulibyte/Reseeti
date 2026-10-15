@@ -8,6 +8,7 @@ const REASON_LABELS = {
   restock: 'Restock',
   adjustment: 'Adjustment',
   correction: 'Correction',
+  void: 'Returned — invoice voided',
 };
 
 // memberNames: map of user_id -> display name, built once on the

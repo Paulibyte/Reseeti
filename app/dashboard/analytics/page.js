@@ -172,7 +172,8 @@ export default function AnalyticsPage() {
     const { data: invs } = await supabase
       .from('invoices')
       .select('id, customer_id, customer_name, total, paid, paid_at, created_at')
-      .eq('business_id', biz.id);
+      .eq('business_id', biz.id)
+      .is('voided_at', null); // voided sales never happened — keep them out of every figure here
     setInvoices(invs || []);
 
     const { data: exps } = await supabase

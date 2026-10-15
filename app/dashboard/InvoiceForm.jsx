@@ -189,9 +189,11 @@ export default function InvoiceForm({ business, onClose, onSaved, resumeDraft, o
     // now, not a stale list from when the invoice form first loaded.
     const { data } = await supabase
       .from('device_units')
-      .select('id, serial_number, imei1, color, condition, invoice_items(id)')
+      .select('id, serial_number, imei1, color, condition, invoice_items(id, invoices(voided_at))')
       .eq('product_id', product.id);
-    setAvailableUnits((data || []).filter((u) => !u.invoice_items || u.invoice_items.length === 0));
+    // Available = no sale on a NON-voided invoice. A unit from a voided
+    // sale is sellable again.
+    setAvailableUnits((data || []).filter((u) => !(u.invoice_items || []).some((ii) => !ii.invoices?.voided_at)));
     setLoadingUnits(false);
   }
 

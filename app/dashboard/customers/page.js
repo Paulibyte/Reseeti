@@ -98,7 +98,8 @@ export default function CustomersPage() {
     const { data: invs } = await supabase
       .from('invoices')
       .select('id, customer_id, customer_name, customer_phone, total, paid, created_at')
-      .eq('business_id', biz.id);
+      .eq('business_id', biz.id)
+      .is('voided_at', null); // a voided invoice isn't a debt
     setInvoices(invs || []);
 
     // Needed so an unpaid invoice with a partial payment already logged

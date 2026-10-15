@@ -27,12 +27,16 @@ export async function POST(req) {
 
   const { data: invoice } = await supabase
     .from('invoices')
-    .select('id, total, business_id, invoice_payments(amount)')
+    .select('id, total, business_id, voided_at, invoice_payments(amount)')
     .eq('id', invoiceId)
     .maybeSingle();
 
   if (!invoice) {
     return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
+  }
+
+  if (invoice.voided_at) {
+    return NextResponse.json({ error: 'This invoice has been voided and can no longer be paid.' }, { status: 400 });
   }
 
   const paidSoFar = (invoice.invoice_payments || []).reduce((sum, p) => sum + Number(p.amount), 0);

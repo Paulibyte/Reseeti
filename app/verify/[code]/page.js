@@ -19,7 +19,7 @@ export default async function VerifyPage({ params }) {
 
   const { data: invoice } = await supabase
     .from('invoices')
-    .select('id, invoice_number, total, paid, created_at, business_id, verification_code')
+    .select('id, invoice_number, total, paid, voided_at, created_at, business_id, verification_code')
     .eq('verification_code', params.code.toUpperCase())
     .maybeSingle();
 
@@ -51,12 +51,17 @@ export default async function VerifyPage({ params }) {
 
   return (
     <Shell>
-      <div style={{ fontSize: 40, marginBottom: 6 }}>{invoice.paid ? '✅' : '📄'}</div>
-      <p style={{ fontWeight: 700, color: 'var(--heading)', fontSize: 18, margin: '0 0 4px' }}>
-        Genuine receipt
+      {/* A voided invoice is still a real record, but it must never read as
+          a valid receipt — otherwise a voided (e.g. refunded) receipt could
+          be shown as proof of purchase. */}
+      <div style={{ fontSize: 40, marginBottom: 6 }}>{invoice.voided_at ? '🚫' : invoice.paid ? '✅' : '📄'}</div>
+      <p style={{ fontWeight: 700, color: invoice.voided_at ? 'var(--danger)' : 'var(--heading)', fontSize: 18, margin: '0 0 4px' }}>
+        {invoice.voided_at ? 'Voided — no longer valid' : 'Genuine receipt'}
       </p>
       <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: '0 0 20px' }}>
-        Verified against Reseeti's records
+        {invoice.voided_at
+          ? 'This invoice exists in Reseeti\'s records but was cancelled by the seller.'
+          : 'Verified against Reseeti\'s records'}
       </p>
 
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '18px 20px', textAlign: 'left' }}>
@@ -66,8 +71,8 @@ export default async function VerifyPage({ params }) {
         <Row label="Amount" value={money(invoice.total)} bold />
         <Row
           label="Status"
-          value={invoice.paid ? 'Paid' : 'Unpaid'}
-          valueColor={invoice.paid ? 'var(--success)' : 'var(--danger)'}
+          value={invoice.voided_at ? 'VOID' : invoice.paid ? 'Paid' : 'Unpaid'}
+          valueColor={invoice.voided_at ? 'var(--danger)' : invoice.paid ? 'var(--success)' : 'var(--danger)'}
         />
         <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px dashed var(--border)' }}>
           <Row label="Security hash" value={signature} mono small />

@@ -27,12 +27,15 @@ export async function POST(request, { params }) {
 
   const { data: invoice } = await supabase
     .from('invoices')
-    .select('id, customer_signature_data')
+    .select('id, customer_signature_data, voided_at')
     .eq('id', params.id)
     .single();
 
   if (!invoice) {
     return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
+  }
+  if (invoice.voided_at) {
+    return NextResponse.json({ error: 'This invoice has been voided and can no longer be signed.' }, { status: 400 });
   }
   if (invoice.customer_signature_data) {
     return NextResponse.json({ error: 'This receipt has already been signed' }, { status: 409 });

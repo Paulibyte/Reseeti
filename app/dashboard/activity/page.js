@@ -15,6 +15,8 @@ import { can } from '../../../lib/permissions';
 // reasonably.
 const EVENT_LABELS = {
   invoice_marked_paid: 'Invoice marked paid',
+  invoice_voided: 'Invoice voided',
+  invoice_payment_refunded: 'Payment refunded',
   reminder_sent: 'Reminder sent (WhatsApp link)',
   sms_reminder_sent: 'SMS reminder sent',
   sms_reminder_failed: 'SMS reminder failed',
@@ -113,7 +115,15 @@ export default function ActivityPage() {
               display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
             }}
           >
-            <span style={{ fontSize: 13.5, color: 'var(--text)' }}>{labelFor(e.event_type)}</span>
+            <div style={{ minWidth: 0 }}>
+              <span style={{ fontSize: 13.5, color: 'var(--text)' }}>{labelFor(e.event_type)}</span>
+              {/* Written by the database functions for voids and refunds
+                  (who/what/why in one line); other event types carry no
+                  summary and simply show their label as before. */}
+              {e.metadata?.summary && (
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2, overflowWrap: 'anywhere' }}>{e.metadata.summary}</div>
+              )}
+            </div>
             <span style={{ fontSize: 11.5, color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>
               {new Date(e.created_at).toLocaleString('en-NG')}
             </span>

@@ -38,7 +38,7 @@ export const dynamic = 'force-dynamic';
 // already in place.
 export const fetchCache = 'force-no-store';
 
-const INVOICE_SELECT = 'id, invoice_number, customer_id, customer_name, customer_phone, subtotal, discount, loyalty_discount_applied, loyalty_discount_amount, service_charge_rate, service_charge_amount, vat_rate, vat_amount, shipping_fee, withholding_tax_rate, withholding_tax_amount, total, paid, payment_method, verification_code, estimated_delivery_date, due_date, custom_field_values, customer_signature_data, created_at, business_id, student_id, invoice_items(id, description, qty, price, sort_order), invoice_payments(method, amount), customers(email)';
+const INVOICE_SELECT = 'id, invoice_number, customer_id, customer_name, customer_phone, subtotal, discount, loyalty_discount_applied, loyalty_discount_amount, service_charge_rate, service_charge_amount, vat_rate, vat_amount, shipping_fee, withholding_tax_rate, withholding_tax_amount, total, paid, payment_method, verification_code, estimated_delivery_date, due_date, voided_at, custom_field_values, customer_signature_data, created_at, business_id, student_id, invoice_items(id, description, qty, price, sort_order), invoice_payments(method, amount), customers(email)';
 
 // A short, deliberately narrow safety net for a real, confirmed
 // inconsistency at the Supabase/database layer itself — not something
