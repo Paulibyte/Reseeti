@@ -17,6 +17,8 @@ const EVENT_LABELS = {
   invoice_marked_paid: 'Invoice marked paid',
   invoice_voided: 'Invoice voided',
   invoice_payment_refunded: 'Payment refunded',
+  jobtins_opt_in: 'Listed on Jobtins',
+  jobtins_opt_out: 'Removed from Jobtins',
   reminder_sent: 'Reminder sent (WhatsApp link)',
   sms_reminder_sent: 'SMS reminder sent',
   sms_reminder_failed: 'SMS reminder failed',

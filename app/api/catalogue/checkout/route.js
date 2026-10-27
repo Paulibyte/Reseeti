@@ -54,7 +54,7 @@ export async function POST(req) {
   const productIds = [...new Set(items.map((it) => it.productId).filter(Boolean))];
   const { data: products } = await admin
     .from('products')
-    .select('id, name, price, unit, unit_value')
+    .select('id, name, price, unit, unit_value, type, stock_qty')
     .eq('business_id', business.id)
     .eq('show_in_catalogue', true)
     .in('id', productIds);
@@ -62,13 +62,35 @@ export async function POST(req) {
   const productMap = Object.fromEntries((products || []).map((p) => [p.id, p]));
 
   const orderItems = [];
+  const soldOut = [];
   let total = 0;
   for (const it of items) {
     const product = productMap[it.productId];
     const qty = Number(it.qty);
     if (!product || !Number.isFinite(qty) || qty <= 0 || qty > 1000) continue;
+    // The shop page greys out and hides "Add" for exactly this case, but a
+    // page that was open before something sold out can still send it. This
+    // is the route that takes real money, so it re-checks here instead of
+    // trusting the page. Same rule as ShopCart: a service has no stock to
+    // run out of. Unlike tampered/unknown items (silently dropped, above),
+    // a sold-out item is a genuine situation the customer must be told
+    // about — dropping it quietly would charge them for a different order
+    // than the one they thought they placed.
+    if (product.type !== 'service' && Number(product.stock_qty) <= 0) {
+      if (!soldOut.includes(product.name)) soldOut.push(product.name);
+      continue;
+    }
     orderItems.push({ product_id: product.id, name: product.name, unit: product.unit, unit_value: product.unit_value, qty, price: product.price });
     total += product.price * qty;
+  }
+
+  if (soldOut.length > 0) {
+    const names = soldOut.length > 3 ? `${soldOut.slice(0, 3).join(', ')} and ${soldOut.length - 3} more` : soldOut.join(', ');
+    const one = soldOut.length === 1;
+    return NextResponse.json(
+      { error: `Sorry, ${names} ${one ? 'is' : 'are'} out of stock right now. Please remove ${one ? 'it' : 'them'} from your order and try again.`, soldOut },
+      { status: 409 }
+    );
   }
 
   if (orderItems.length === 0) {

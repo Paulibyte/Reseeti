@@ -50,7 +50,11 @@ export default async function ShopPage({ params }) {
 
   const { data: products } = await supabase
     .from('products')
-    .select('id, name, description, price, unit, unit_value, category, stock_qty, photo_url')
+    // `type` MUST be selected: ShopCart decides "out of stock" with
+    // `p.type !== 'service' && stock_qty <= 0`. Without it every product
+    // looked like a non-service, so a service (which has no stock count)
+    // showed as "Out of stock", greyed out, with no Add button.
+    .select('id, name, description, price, unit, unit_value, category, type, stock_qty, photo_url')
     .eq('business_id', business.id)
     .eq('show_in_catalogue', true)
     .order('category')
