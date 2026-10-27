@@ -1,20 +1,41 @@
 /** @type {import('next').NextConfig} */
 const { withSentryConfig } = require('@sentry/nextjs');
 
+// The image optimiser may only fetch from THIS project's own Supabase Storage.
+// Business logos and signatures live there, on a per-project hostname. The
+// hostname is read from NEXT_PUBLIC_SUPABASE_URL, so local dev, staging and
+// production each allow only their own project and this file never needs
+// editing when the app is pointed at a different one.
+//
+// This replaces the earlier wildcard ('**.supabase.co'): anyone can create a
+// free Supabase project, so the wildcard let any stranger make this server
+// fetch and process files they host. If the variable is missing, NO remote
+// image is allowed (fail closed) rather than falling back to a wildcard.
+const supabaseHost = (() => {
+  try {
+    return new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).hostname;
+  } catch {
+    return null;
+  }
+})();
+
 const nextConfig = {
   images: {
-    // Business logos and signatures live in Supabase Storage, on a
-    // per-project *.supabase.co hostname. A wildcard pattern is used
-    // (rather than hardcoding one project ref) so this config doesn't
-    // need editing every time the app is pointed at a different Supabase
-    // project (local dev vs. staging vs. production).
-    remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: '**.supabase.co',
-        pathname: '/storage/v1/object/public/**',
-      },
-    ],
+    remotePatterns: supabaseHost
+      ? [
+          {
+            protocol: 'https',
+            hostname: supabaseHost,
+            pathname: '/storage/v1/object/public/**',
+          },
+        ]
+      : [],
+    // These two are Next's defaults, stated on purpose: the image optimiser
+    // has had critical flaws in AVIF and SVG handling (Aug and Oct 2026), so
+    // neither format should ever be switched on here by accident. Also do not
+    // install the optional `sharp` package until Next.js has been upgraded.
+    formats: ['image/webp'],
+    dangerouslyAllowSVG: false,
   },
 };
 
