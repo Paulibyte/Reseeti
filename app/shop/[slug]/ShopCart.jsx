@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 function formatNaira(n) {
   return `₦${Number(n || 0).toLocaleString()}`;
@@ -29,15 +29,85 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
+  // Search and filters (all in the browser: the whole catalogue is already loaded).
+  const [search, setSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [kindFilter, setKindFilter] = useState(''); // '' | 'product' | 'service'
+  const [inStockOnly, setInStockOnly] = useState(false);
+  const [sort, setSort] = useState('default'); // 'default' | 'price-asc' | 'price-desc'
+  const [linkedMissing, setLinkedMissing] = useState(false);
+
+  const isService = (p) => p.type === 'service';
+  const isSoldOut = (p) => !isService(p) && Number(p.stock_qty) <= 0;
+  const categoryOf = (p) => p.category || 'Products';
+
+  const categories = useMemo(() => {
+    const counts = {};
+    for (const p of products) counts[categoryOf(p)] = (counts[categoryOf(p)] || 0) + 1;
+    return Object.entries(counts).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [products]);
+  const hasServices = products.some(isService);
+  const hasGoods = products.some((p) => !isService(p));
+  const hasSoldOut = products.some(isSoldOut);
+
+  const words = search.toLowerCase().split(/\s+/).filter(Boolean);
+  const filtersActive = !!(words.length || categoryFilter || kindFilter || inStockOnly);
+
+  const filtered = useMemo(() => products.filter((p) => {
+    if (categoryFilter && categoryOf(p) !== categoryFilter) return false;
+    if (kindFilter === 'service' && !isService(p)) return false;
+    if (kindFilter === 'product' && isService(p)) return false;
+    if (inStockOnly && isSoldOut(p)) return false;
+    if (words.length) {
+      const hay = [p.name, p.description, p.category, p.unit_value, p.unit].filter(Boolean).join(' ').toLowerCase();
+      if (!words.every((w) => hay.includes(w))) return false;
+    }
+    return true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [products, categoryFilter, kindFilter, inStockOnly, search]);
+
   const grouped = useMemo(() => {
+    if (sort !== 'default') {
+      const dir = sort === 'price-asc' ? 1 : -1;
+      const sorted = [...filtered].sort((a, b) => dir * (Number(a.price) - Number(b.price)) || String(a.name).localeCompare(String(b.name)));
+      return sorted.length ? { [sort === 'price-asc' ? 'Price: low to high' : 'Price: high to low']: sorted } : {};
+    }
     const byCategory = {};
-    for (const p of products) {
-      const key = p.category || 'Products';
+    for (const p of filtered) {
+      const key = categoryOf(p);
       if (!byCategory[key]) byCategory[key] = [];
       byCategory[key].push(p);
     }
     return byCategory;
-  }, [products]);
+  }, [filtered, sort]);
+
+  function clearFilters() {
+    setSearch(''); setCategoryFilter(''); setKindFilter(''); setInStockOnly(false); setSort('default');
+  }
+
+  // A link such as /shop/my-shop?product=<id> (from Jobtins, or one a customer shares) opens that item
+  // straight away. The parameter is removed from the address afterwards so a refresh doesn't reopen it.
+  useEffect(() => {
+    let wanted = null;
+    try {
+      const url = new URL(window.location.href);
+      wanted = url.searchParams.get('product');
+      if (wanted !== null) {
+        url.searchParams.delete('product');
+        window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+      }
+    } catch { /* an unusual address: just show the catalogue */ }
+    if (!wanted) return;
+    const hit = products.find((p) => String(p.id).toLowerCase() === wanted.trim().toLowerCase());
+    if (!hit) { setLinkedMissing(true); return; }
+    setDetailProduct(hit);
+    // Also bring its card into view, so closing the sheet leaves the customer right at the item.
+    window.requestAnimationFrame(() => {
+      const card = document.getElementById(`item-${hit.id}`);
+      if (card && card.scrollIntoView) card.scrollIntoView({ block: 'center' });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const cartItems = useMemo(() => {
     return Object.entries(cart)
@@ -162,29 +232,125 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
       </header>
 
       {products.length > 0 && (
-        <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '12px 16px 0' }}>
-          <div style={{ display: 'flex', border: '1px solid #e6ddd0', borderRadius: 8, overflow: 'hidden' }}>
-            <button
-              onClick={() => setView('grid')}
-              aria-label="Grid view"
-              style={{ padding: '6px 10px', border: 'none', cursor: 'pointer', fontSize: 14, background: view === 'grid' ? accent : '#fff', color: view === 'grid' ? '#fff' : '#8a8175' }}
+        <div style={{ padding: '12px 16px 0' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ position: 'relative', flex: 1 }}>
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search this catalogue"
+                aria-label="Search this catalogue"
+                enterKeyHint="search"
+                maxLength={80}
+                style={{ width: '100%', boxSizing: 'border-box', padding: '9px 32px 9px 12px', border: '1px solid #e6ddd0', borderRadius: 8, fontSize: 14, background: '#fff', color: '#1a2a4a' }}
+              />
+              {search && (
+                <button
+                  onClick={() => setSearch('')}
+                  aria-label="Clear search"
+                  style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'none', color: '#8a8175', fontSize: 20, cursor: 'pointer', lineHeight: 1, padding: '0 4px' }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+            <div style={{ display: 'flex', border: '1px solid #e6ddd0', borderRadius: 8, overflow: 'hidden' }}>
+              <button
+                onClick={() => setView('grid')}
+                aria-label="Grid view"
+                style={{ padding: '6px 10px', border: 'none', cursor: 'pointer', fontSize: 14, background: view === 'grid' ? accent : '#fff', color: view === 'grid' ? '#fff' : '#8a8175' }}
+              >
+                ▦
+              </button>
+              <button
+                onClick={() => setView('list')}
+                aria-label="List view"
+                style={{ padding: '6px 10px', border: 'none', cursor: 'pointer', fontSize: 14, background: view === 'list' ? accent : '#fff', color: view === 'list' ? '#fff' : '#8a8175' }}
+              >
+                ☰
+              </button>
+            </div>
+          </div>
+
+          {categories.length > 1 && (
+            <div role="group" aria-label="Filter by category" style={{ display: 'flex', gap: 6, overflowX: 'auto', padding: '10px 0 2px' }}>
+              {[['', products.length], ...categories].map(([name, count]) => {
+                const on = categoryFilter === name;
+                return (
+                  <button
+                    key={name || '__all'}
+                    onClick={() => setCategoryFilter(name)}
+                    aria-pressed={on}
+                    style={{ flex: '0 0 auto', padding: '5px 12px', borderRadius: 999, border: `1px solid ${on ? accent : '#e6ddd0'}`, background: on ? accent : '#fff', color: on ? '#fff' : '#5a5248', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                  >
+                    {name || 'All'} <span style={{ opacity: 0.7, fontWeight: 400 }}>{count}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', paddingTop: 8, fontSize: 12.5, color: '#8a8175' }}>
+            <select
+              value={sort}
+              onChange={(e) => setSort(e.target.value)}
+              aria-label="Sort items"
+              style={{ padding: '5px 8px', border: '1px solid #e6ddd0', borderRadius: 8, background: '#fff', color: '#5a5248', fontSize: 12.5 }}
             >
-              ▦
-            </button>
-            <button
-              onClick={() => setView('list')}
-              aria-label="List view"
-              style={{ padding: '6px 10px', border: 'none', cursor: 'pointer', fontSize: 14, background: view === 'list' ? accent : '#fff', color: view === 'list' ? '#fff' : '#8a8175' }}
-            >
-              ☰
-            </button>
+              <option value="default">Sort: by category</option>
+              <option value="price-asc">Price: low to high</option>
+              <option value="price-desc">Price: high to low</option>
+            </select>
+            {hasGoods && hasServices && (
+              <select
+                value={kindFilter}
+                onChange={(e) => setKindFilter(e.target.value)}
+                aria-label="Show products or services"
+                style={{ padding: '5px 8px', border: '1px solid #e6ddd0', borderRadius: 8, background: '#fff', color: '#5a5248', fontSize: 12.5 }}
+              >
+                <option value="">Products and services</option>
+                <option value="product">Products only</option>
+                <option value="service">Services only</option>
+              </select>
+            )}
+            {hasSoldOut && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
+                <input type="checkbox" checked={inStockOnly} onChange={(e) => setInStockOnly(e.target.checked)} />
+                In stock only
+              </label>
+            )}
+            {filtersActive && (
+              <>
+                <span role="status">{filtered.length} of {products.length} shown</span>
+                <button onClick={clearFilters} style={{ border: 'none', background: 'none', color: accent, fontWeight: 700, fontSize: 12.5, cursor: 'pointer', padding: 0 }}>
+                  Clear
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
 
       <div style={{ padding: '16px 16px 0' }}>
+        {linkedMissing && (
+          <div role="status" style={{ background: '#fff7e6', border: '1px solid #f0d9a8', color: '#6b5420', borderRadius: 10, padding: '10px 12px', fontSize: 13, marginBottom: 14, display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+            <span>That item isn&apos;t in this catalogue right now. Here is everything else {businessName} offers.</span>
+            <button onClick={() => setLinkedMissing(false)} aria-label="Dismiss" style={{ border: 'none', background: 'none', color: '#6b5420', fontSize: 18, cursor: 'pointer', lineHeight: 1 }}>×</button>
+          </div>
+        )}
+
         {products.length === 0 && (
           <p style={{ textAlign: 'center', color: '#8a8175', fontSize: 14, marginTop: 40 }}>Nothing in the catalogue yet — check back soon.</p>
+        )}
+
+        {products.length > 0 && filtered.length === 0 && (
+          <div style={{ textAlign: 'center', marginTop: 36 }}>
+            <p style={{ color: '#5a5248', fontSize: 14, margin: '0 0 10px' }}>Nothing matches your search.</p>
+            <button onClick={clearFilters} style={{ background: accent, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+              Clear search and filters
+            </button>
+          </div>
         )}
 
         {Object.entries(grouped).map(([category, items]) => (
@@ -200,7 +366,7 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
                   const qty = cart[p.id] || 0;
                   const sizeLabel = p.unit_value ? `${p.unit_value}${p.unit || ''}` : (p.unit || null);
                   return (
-                    <div key={p.id} style={{ background: '#fff', border: '1px solid #e6ddd0', borderRadius: 10, overflow: 'hidden', opacity: outOfStock ? 0.55 : 1 }}>
+                    <div key={p.id} id={`item-${p.id}`} style={{ background: '#fff', border: '1px solid #e6ddd0', borderRadius: 10, overflow: 'hidden', opacity: outOfStock ? 0.55 : 1 }}>
                       <button
                         onClick={() => setDetailProduct(p)}
                         style={{ display: 'block', width: '100%', border: 'none', background: 'none', padding: 0, cursor: 'pointer', textAlign: 'left' }}
@@ -254,6 +420,7 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
                   return (
                     <div
                       key={p.id}
+                      id={`item-${p.id}`}
                       style={{
                         display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
                         padding: '12px 14px', background: '#fff', border: '1px solid #e6ddd0', borderRadius: 10,
