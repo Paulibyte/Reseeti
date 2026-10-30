@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 function formatNaira(n) {
   return `₦${Number(n || 0).toLocaleString()}`;
@@ -16,6 +16,46 @@ function toWhatsAppDigits(input) {
   if (digits.startsWith('234')) return digits;
   return '234' + digits;
 }
+
+// Layout rules for the shop page. The page adapts to the screen: a wider, multi-column grid on computers, a two-column
+// product view (photo left, details right) on larger screens, and a bottom sheet on phones.
+const SHOP_CSS = `
+.rsh-wrap{max-width:1180px;margin:0 auto}
+.rsh-grid{display:grid;gap:12px;grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(min-width:600px){.rsh-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(min-width:860px){.rsh-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(min-width:1120px){.rsh-grid{grid-template-columns:repeat(5,minmax(0,1fr))}}
+.rsh-list{display:flex;flex-direction:column;gap:8px;max-width:820px;margin:0 auto}
+.rsh-overlay{position:fixed;inset:0;background:rgba(26,42,74,.5);display:flex;align-items:flex-end;justify-content:center;z-index:80}
+.rsh-sheet{background:#fff;width:100%;max-width:520px;max-height:92vh;border-radius:16px 16px 0 0;display:flex;flex-direction:column;overflow:hidden}
+.rsh-media{flex:0 0 auto;height:clamp(170px,32vh,300px);background:#f7f3ec;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.rsh-media img{width:100%;height:100%;object-fit:contain;display:block;background:#fff}
+.rsh-sheet:focus{outline:none}
+.rsh-ph{font-size:48px}
+.rsh-info{display:flex;flex-direction:column;min-height:0;min-width:0;flex:1 1 auto}
+.rsh-scroll{overflow-y:auto;padding:16px 18px 8px;flex:1 1 auto;overflow-wrap:anywhere}
+.rsh-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.rsh-kicker{margin:0 0 3px;font-size:11.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#8a8175}
+.rsh-title{margin:0;font-size:18px;font-weight:800;color:#1a2a4a;line-height:1.3}
+.rsh-close{flex:0 0 auto;background:none;border:none;color:#8a8175;font-size:26px;line-height:1;cursor:pointer;padding:0 4px;margin:-4px -4px 0 0}
+.rsh-price{margin:8px 0 2px;font-size:22px;font-weight:800}
+.rsh-status{margin:0 0 10px;font-size:12.5px;font-weight:700}
+.rsh-h{margin:14px 0 4px;font-size:13px;color:#1a2a4a}
+.rsh-desc{margin:0;font-size:13.5px;color:#5a5248;line-height:1.6;white-space:pre-line}
+.rsh-foot{padding:12px 18px calc(12px + env(safe-area-inset-bottom));border-top:1px solid #eee;background:#fff;flex:0 0 auto}
+.rsh-add{width:100%;color:#fff;border:none;border-radius:10px;padding:13px;font-weight:700;font-size:14.5px;cursor:pointer}
+.rsh-step{display:flex;align-items:center;justify-content:center;gap:16px}
+@media(min-width:760px){
+  .rsh-overlay{align-items:center;padding:24px}
+  .rsh-sheet{max-width:880px;flex-direction:row;border-radius:16px;max-height:min(86vh,620px)}
+  .rsh-media{flex:0 0 46%;height:auto;min-height:300px}
+  .rsh-info{flex:1 1 54%}
+  .rsh-scroll{padding:24px 24px 12px}
+  .rsh-title{font-size:22px}
+  .rsh-price{font-size:26px}
+  .rsh-foot{padding:14px 24px}
+}
+`;
 
 export default function ShopCart({ slug, businessName, businessAddress, whatsappNumber, canPayOnline, logoUrl, accentColor, products }) {
   const accent = accentColor || '#d97a2b';
@@ -80,6 +120,18 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
     }
     return byCategory;
   }, [filtered, sort]);
+
+  const sheetRef = useRef(null);
+  useEffect(() => {
+    if (!detailProduct) return undefined;
+    // keyboard and screen-reader users start inside the product view
+    window.requestAnimationFrame(() => { if (sheetRef.current) sheetRef.current.focus(); });
+    const onKey = (e) => { if (e.key === 'Escape') setDetailProduct(null); };
+    document.addEventListener('keydown', onKey);
+    const before = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = before; };
+  }, [detailProduct]);
 
   function clearFilters() {
     setSearch(''); setCategoryFilter(''); setKindFilter(''); setInStockOnly(false); setSort('default');
@@ -220,7 +272,8 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
   }
 
   return (
-    <main style={{ maxWidth: 640, margin: '0 auto', paddingBottom: itemCount > 0 ? 96 : 40, fontFamily: 'sans-serif', background: '#faf6ef', minHeight: '100vh' }}>
+    <main style={{ paddingBottom: itemCount > 0 ? 96 : 40, fontFamily: 'sans-serif', background: '#faf6ef', minHeight: '100vh' }}>
+      <style>{SHOP_CSS}</style>
       <div style={{ height: 4, background: accent }} />
       <header style={{ padding: '28px 20px 20px', textAlign: 'center', borderBottom: '1px solid #e6ddd0' }}>
         {logoUrl && (
@@ -232,7 +285,7 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
       </header>
 
       {products.length > 0 && (
-        <div style={{ padding: '12px 16px 0' }}>
+        <div className="rsh-wrap" style={{ padding: '12px 16px 0' }}>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <div style={{ position: 'relative', flex: 1 }}>
               <input
@@ -332,7 +385,7 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
         </div>
       )}
 
-      <div style={{ padding: '16px 16px 0' }}>
+      <div className="rsh-wrap" style={{ padding: '16px 16px 0' }}>
         {linkedMissing && (
           <div role="status" style={{ background: '#fff7e6', border: '1px solid #f0d9a8', color: '#6b5420', borderRadius: 10, padding: '10px 12px', fontSize: 13, marginBottom: 14, display: 'flex', justifyContent: 'space-between', gap: 10 }}>
             <span>That item isn&apos;t in this catalogue right now. Here is everything else {businessName} offers.</span>
@@ -360,7 +413,7 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
             </h2>
 
             {view === 'grid' ? (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+              <div className="rsh-grid">
                 {items.map((p) => {
                   const outOfStock = p.type !== 'service' && Number(p.stock_qty) <= 0;
                   const qty = cart[p.id] || 0;
@@ -372,7 +425,7 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
                         style={{ display: 'block', width: '100%', border: 'none', background: 'none', padding: 0, cursor: 'pointer', textAlign: 'left' }}
                       >
                         {p.photo_url ? (
-                          <img src={p.photo_url} alt="" style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', display: 'block' }} />
+                          <img src={p.photo_url} alt="" loading="lazy" style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'contain', background: '#fff', display: 'block' }} />
                         ) : (
                           <div style={{ width: '100%', aspectRatio: '1 / 1', background: '#f5f0e8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28 }}>
                             🛍️
@@ -410,7 +463,7 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
                 })}
               </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div className="rsh-list">
                 {items.map((p) => {
                   // Services (Stage 49) carry no real stock — always
                   // available, never shown as out of stock.
@@ -474,53 +527,54 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
 
       {detailProduct && (() => {
         const p = detailProduct;
-        const outOfStock = p.type !== 'service' && Number(p.stock_qty) <= 0;
+        const isService = p.type === 'service';
+        const outOfStock = !isService && Number(p.stock_qty) <= 0;
         const qty = cart[p.id] || 0;
         const sizeLabel = p.unit_value ? `${p.unit_value}${p.unit || ''}` : (p.unit || null);
         return (
-          <div
-            onClick={() => setDetailProduct(null)}
-            style={{ position: 'fixed', inset: 0, background: 'rgba(26,42,74,0.5)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 80 }}
-          >
-            <div
-              onClick={(e) => e.stopPropagation()}
-              style={{ background: '#fff', borderRadius: '16px 16px 0 0', maxWidth: 480, width: '100%', maxHeight: '85vh', overflowY: 'auto' }}
-            >
-              {p.photo_url ? (
-                <img src={p.photo_url} alt="" style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', display: 'block' }} />
-              ) : (
-                <div style={{ width: '100%', aspectRatio: '1 / 1', background: '#f5f0e8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 48 }}>
-                  🛍️
-                </div>
-              )}
-              <div style={{ padding: 20 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 6 }}>
-                  <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: '#1a2a4a' }}>
-                    {p.name}{sizeLabel ? ` (${sizeLabel})` : ''}
-                  </h3>
-                  <button onClick={() => setDetailProduct(null)} style={{ background: 'none', border: 'none', color: '#8a8175', fontSize: 22, cursor: 'pointer', lineHeight: 1, flexShrink: 0 }}>×</button>
-                </div>
-                <p style={{ margin: '0 0 10px', fontSize: 16, fontWeight: 700, color: accent }}>
-                  {formatNaira(p.price)}{outOfStock ? ' · Out of stock' : ''}
-                </p>
-                {p.description && (
-                  <p style={{ margin: '0 0 16px', fontSize: 13.5, color: '#5a5248', lineHeight: 1.6 }}>{p.description}</p>
+          <div className="rsh-overlay" role="dialog" aria-modal="true" aria-label={p.name} onClick={() => setDetailProduct(null)}>
+            <div className="rsh-sheet" ref={sheetRef} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
+              <div className="rsh-media">
+                {p.photo_url ? (
+                  <img src={p.photo_url} alt={p.name} />
+                ) : (
+                  <div className="rsh-ph" aria-hidden="true">🛍️</div>
                 )}
-                {!outOfStock && (
-                  qty === 0 ? (
-                    <button
-                      onClick={() => setQty(p.id, 1)}
-                      style={{ width: '100%', background: accent, color: '#fff', border: 'none', borderRadius: 10, padding: '13px', fontWeight: 700, fontSize: 14.5, cursor: 'pointer' }}
-                    >
-                      Add to order
-                    </button>
-                  ) : (
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
-                      <button onClick={() => setQty(p.id, qty - 1)} style={stepperBtn}>−</button>
-                      <span style={{ minWidth: 24, textAlign: 'center', fontWeight: 700, fontSize: 16 }}>{qty}</span>
-                      <button onClick={() => setQty(p.id, qty + 1)} style={stepperBtn}>+</button>
+              </div>
+              <div className="rsh-info">
+                <div className="rsh-scroll">
+                  <div className="rsh-head">
+                    <div style={{ minWidth: 0 }}>
+                      {p.category && <p className="rsh-kicker">{p.category}</p>}
+                      <h3 className="rsh-title">{p.name}{sizeLabel ? ` (${sizeLabel})` : ''}</h3>
                     </div>
-                  )
+                    <button className="rsh-close" onClick={() => setDetailProduct(null)} aria-label="Close">×</button>
+                  </div>
+                  <p className="rsh-price" style={{ color: accent }}>{formatNaira(p.price)}</p>
+                  <p className="rsh-status" style={{ color: outOfStock ? '#b42318' : '#2d7a4f' }}>
+                    {isService ? 'Service' : outOfStock ? 'Out of stock' : 'In stock'}
+                  </p>
+                  {p.description && (
+                    <>
+                      <h4 className="rsh-h">Description</h4>
+                      <p className="rsh-desc">{p.description}</p>
+                    </>
+                  )}
+                </div>
+                {!outOfStock && (
+                  <div className="rsh-foot">
+                    {qty === 0 ? (
+                      <button onClick={() => setQty(p.id, 1)} className="rsh-add" style={{ background: accent }}>
+                        Add to order
+                      </button>
+                    ) : (
+                      <div className="rsh-step">
+                        <button onClick={() => setQty(p.id, qty - 1)} style={stepperBtn}>−</button>
+                        <span style={{ minWidth: 24, textAlign: 'center', fontWeight: 700, fontSize: 16 }}>{qty}</span>
+                        <button onClick={() => setQty(p.id, qty + 1)} style={stepperBtn}>+</button>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
