@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createClient } from '../../../lib/supabaseClient';
 import CameraBarcodeScanner, { isCameraScanningSupported } from '../../components/CameraBarcodeScanner';
 import { queueEdit } from '../../../lib/offlineQueue';
 import { getMaxImageUploadMb, getMaxImageUploadBytes } from '../../../lib/maxUploadSize';
+import { MAX_PRODUCT_PHOTOS, photosOf, photosChanged, movePhoto, makeCover, newPhotoPath, storagePathFor } from '../../../lib/productPhotos';
+import { prepareImage } from '../../../lib/compressImage';
 
 export default function ProductForm({ business, product, familyId, familyName, onClose, onSaved }) {
   const supabase = createClient();
@@ -29,37 +31,89 @@ export default function ProductForm({ business, product, familyId, familyName, o
   const [showCameraScanner, setShowCameraScanner] = useState(false);
   const cameraSupported = typeof window !== 'undefined' && isCameraScanningSupported();
 
-  // Photo — uploaded as a follow-up step after the product row itself
-  // is saved (see save() below), not bundled into the same insert/
-  // update call: a brand-new product has no id to build the storage
-  // path from until after that first insert returns one.
-  const [photoFile, setPhotoFile] = useState(null);
-  const [photoPreview, setPhotoPreview] = useState(product?.photo_url || '');
-  const [removePhoto, setRemovePhoto] = useState(false);
+  // Photos. The product row is saved first and the files are uploaded after it: a brand-new product has no id to
+  // build a storage path from until its first insert returns one. Each photo in the list is either one already saved
+  // ({ url }) or one just chosen and waiting to upload ({ file }). The first photo is the cover.
+  //
+  // "This item needs several photos" is a switch: off, the form behaves as it always did (one photo); on, it becomes a
+  // small gallery of up to MAX_PRODUCT_PHOTOS. A product that already has several photos opens with the switch on.
+  const startPhotos = photosOf(product);
+  const savedPhotos = useRef(startPhotos);   // what is saved right now (changes after a partly-failed save)
+  const createdId = useRef(null);            // set once a NEW product row exists, so pressing Save again updates it instead of adding a duplicate
+  const keyCounter = useRef(0);
+  const nextKey = () => `photo-${++keyCounter.current}`;
+  const [slots, setSlots] = useState(() => startPhotos.map((url) => ({ key: nextKey(), url, preview: url })));
+  const [multi, setMulti] = useState(startPhotos.length > 1);
+  const [photoNotice, setPhotoNotice] = useState('');
+  // Photo changes need a connection, so the form says so the moment the connection is lost, even if it was already open.
+  const [online, setOnline] = useState(true);
+  useEffect(() => {
+    const update = () => setOnline(typeof navigator === 'undefined' || navigator.onLine !== false);
+    update();
+    window.addEventListener('online', update);
+    window.addEventListener('offline', update);
+    return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update); };
+  }, []);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState('');
   // Displayed in the hint text below the photo field — fetched once on
   // mount so what's shown always matches the real, current admin
   // setting rather than a stale hardcoded number.
   const [maxUploadMb, setMaxUploadMb] = useState(2);
   useEffect(() => { getMaxImageUploadMb().then(setMaxUploadMb); }, []);
 
-  async function handlePhotoChange(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // Previews of files that were chosen but never saved are released when the form closes.
+  const slotsNow = useRef(slots);
+  slotsNow.current = slots;
+  useEffect(() => () => { slotsNow.current.forEach((s) => { if (s.file) URL.revokeObjectURL(s.preview); }); }, []);
+
+  async function handleAddFiles(e) {
+    const files = Array.from(e.target.files || []);
+    e.target.value = ''; // so choosing the same file again still counts
+    if (files.length === 0) return;
+    setError('');
+    setPhotoNotice('');
     const maxBytes = await getMaxImageUploadBytes();
-    if (file.size > maxBytes) {
-      setError(`Photo must be under ${await getMaxImageUploadMb()}MB.`);
-      return;
+    const mb = await getMaxImageUploadMb();
+    const room = multi ? Math.max(0, MAX_PRODUCT_PHOTOS - slots.length) : 1;
+    const picked = files.slice(0, room);
+    const problems = [];
+    if (files.length > picked.length) problems.push(`Only ${MAX_PRODUCT_PHOTOS} photos fit on one item, so ${files.length - picked.length} ${files.length - picked.length === 1 ? 'was' : 'were'} left out.`);
+    const added = [];
+    for (const original of picked) {
+      if (!/^image\//i.test(original.type || '')) { problems.push(`${original.name} is not a picture.`); continue; }
+      const file = await prepareImage(original); // shrinks big phone photos so they fit the limit
+      if (file.size > maxBytes) { problems.push(`${original.name} is too big: each photo must be under ${mb}MB.`); continue; }
+      added.push({ key: nextKey(), file, preview: URL.createObjectURL(file) });
     }
-    setPhotoFile(file);
-    setRemovePhoto(false);
-    setPhotoPreview(URL.createObjectURL(file));
+    if (added.length > 0) {
+      setSlots((prev) => {
+        if (multi) return [...prev, ...added].slice(0, MAX_PRODUCT_PHOTOS);
+        prev.forEach((s) => { if (s.file) URL.revokeObjectURL(s.preview); });
+        return added.slice(0, 1); // one-photo mode: the new photo replaces the old
+      });
+    }
+    if (problems.length > 0) setPhotoNotice(problems.join(' '));
   }
 
-  function clearPhoto() {
-    setPhotoFile(null);
-    setPhotoPreview('');
-    setRemovePhoto(true);
+  function removeSlot(i) {
+    setSlots((prev) => {
+      if (prev[i] && prev[i].file) URL.revokeObjectURL(prev[i].preview);
+      return prev.filter((_, j) => j !== i);
+    });
+  }
+  function moveSlot(i, to) { setSlots((prev) => movePhoto(prev, i, to)); }
+  function coverSlot(i) { setSlots((prev) => makeCover(prev, i)); }
+
+  function toggleMulti(on) {
+    if (on) { setMulti(true); setPhotoNotice(''); return; }
+    if (slots.length > 1 && !window.confirm(`Keep only the cover photo? The other ${slots.length - 1} will be removed when you save.`)) return;
+    setSlots((prev) => {
+      prev.slice(1).forEach((s) => { if (s.file) URL.revokeObjectURL(s.preview); });
+      return prev.slice(0, 1);
+    });
+    setMulti(false);
+    setPhotoNotice('');
   }
 
   function set(field, value) {
@@ -129,8 +183,10 @@ export default function ProductForm({ business, product, familyId, familyName, o
       return;
     }
 
-    const { data: saved, error: err } = isEdit
-      ? await supabase.from('products').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', product.id).select('id').single()
+    // Once a new product's row exists, pressing Save again (after a photo problem) must update it, not add it twice.
+    const rowId = isEdit ? product.id : createdId.current;
+    const { data: saved, error: err } = rowId
+      ? await supabase.from('products').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', rowId).select('id').single()
       : await supabase.from('products').insert({ ...payload, updated_at: new Date().toISOString() }).select('id').single();
 
     if (err) {
@@ -140,29 +196,69 @@ export default function ProductForm({ business, product, familyId, familyName, o
     }
 
     const productId = saved.id;
+    if (!isEdit) createdId.current = productId;
 
-    if (photoFile) {
+    // Photos: only touched when something about them changed (a photo added, removed, or the order or cover changed).
+    const before = savedPhotos.current;
+    const hasNewFiles = slots.some((sl) => sl.file);
+    if (hasNewFiles || photosChanged(before, slots.map((sl) => sl.url))) {
       setUploadingPhoto(true);
-      const ext = photoFile.name.split('.').pop();
-      const path = `${business.id}/products/${productId}.${ext}`;
-      const { error: uploadError } = await supabase.storage
-        .from('logos')
-        .upload(path, photoFile, { upsert: true, cacheControl: '3600' });
-      if (uploadError) {
-        setUploadingPhoto(false);
+      const total = slots.filter((sl) => sl.file).length;
+      let done = 0;
+      let failed = 0;
+      let firstFailure = '';
+      const finalUrls = [];
+      const nextSlots = [];
+      for (const sl of slots) {
+        if (!sl.file) { finalUrls.push(sl.url); nextSlots.push(sl); continue; }
+        done += 1;
+        setUploadProgress(total > 1 ? `Uploading photo ${done} of ${total}…` : '');
+        const path = newPhotoPath(business.id, productId, sl.file.name);
+        const { error: uploadError } = await supabase.storage
+          .from('logos')
+          .upload(path, sl.file, { upsert: false, cacheControl: '31536000', contentType: sl.file.type || 'image/jpeg' });
+        if (uploadError) {
+          failed += 1;
+          if (!firstFailure) firstFailure = uploadError.message;
+          nextSlots.push(sl); // stays in the form so Save can try it again
+          continue;
+        }
+        const { data: urlData } = supabase.storage.from('logos').getPublicUrl(path);
+        finalUrls.push(urlData.publicUrl);
+        nextSlots.push({ key: sl.key, url: urlData.publicUrl, preview: urlData.publicUrl });
+      }
+
+      let { error: photoErr } = await supabase.from('products').update({ photos: finalUrls, photo_url: finalUrls[0] || null }).eq('id', productId);
+      let coverOnly = false;
+      if (photoErr && /photos/i.test(photoErr.message || '')) {
+        // The database has not had the stage 61 update yet, so it has no list of photos to save: keep the cover
+        // photo only, exactly as the app always worked, rather than losing it too.
+        coverOnly = true;
+        ({ error: photoErr } = await supabase.from('products').update({ photo_url: finalUrls[0] || null }).eq('id', productId));
+      }
+      setUploadingPhoto(false);
+      setUploadProgress('');
+
+      if (photoErr) {
+        setSlots(nextSlots);
         setSaving(false);
-        setError(`Product saved, but the photo failed to upload: ${uploadError.message}`);
+        setError(`The ${isEdit ? 'changes were' : 'product was'} saved, but its photos could not be: ${photoErr.message}`);
         return;
       }
-      const { data: urlData } = supabase.storage.from('logos').getPublicUrl(path);
-      // Cache-bust so the new photo shows immediately instead of a
-      // stale browser-cached version at the same URL — same reasoning
-      // as the existing logo upload in BusinessSettings.jsx.
-      const freshUrl = `${urlData.publicUrl}?t=${Date.now()}`;
-      await supabase.from('products').update({ photo_url: freshUrl }).eq('id', productId);
-      setUploadingPhoto(false);
-    } else if (removePhoto) {
-      await supabase.from('products').update({ photo_url: null }).eq('id', productId);
+      // Photos taken off the item are deleted from storage too (best effort: a failure here loses nothing).
+      const paths = before.filter((u) => !finalUrls.includes(u)).map((u) => storagePathFor(u, business.id)).filter(Boolean);
+      if (paths.length > 0) { try { await supabase.storage.from('logos').remove(paths); } catch { /* nothing to do */ } }
+      savedPhotos.current = coverOnly ? finalUrls.slice(0, 1) : finalUrls;
+      // With the older database only the cover could be saved. That is only worth a warning if there was more than one photo.
+      const lostSome = coverOnly && finalUrls.length > 1;
+      if (failed > 0 || lostSome) {
+        setSlots(nextSlots);
+        setSaving(false);
+        setError(lostSome
+          ? 'Saved, but only the cover photo could be kept: the database needs its latest update (stage 61) before an item can hold several photos.'
+          : `The ${isEdit ? 'changes were' : 'product was'} saved, but ${failed} photo${failed === 1 ? '' : 's'} could not be uploaded (${firstFailure}). Press Save to try again.`);
+        return;
+      }
     }
 
     setSaving(false);
@@ -211,27 +307,69 @@ export default function ProductForm({ business, product, familyId, familyName, o
 
           {business.plan === 'pro' && (
             <>
-              <label style={labelStyle}>Photo (optional)</label>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
-                {photoPreview ? (
-                  <img src={photoPreview} alt="" style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--border)' }} />
-                ) : (
-                  <div style={{ width: 56, height: 56, borderRadius: 8, border: '1px dashed var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, color: 'var(--text-faint)' }}>
-                    📷
+              <label style={labelStyle}>{multi ? 'Photos (optional)' : 'Photo (optional)'}</label>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12.5, color: 'var(--text)', marginBottom: 8, cursor: 'pointer' }}>
+                <input type="checkbox" role="switch" checked={multi} onChange={(e) => toggleMulti(e.target.checked)} aria-label="This item needs several photos" style={{ marginTop: 2 }} />
+                <span>
+                  <b>This item needs several photos</b>{' '}
+                  <span style={{ color: 'var(--text-faint)' }}>(cars, property, furniture, anything people want to see from every side)</span>
+                </span>
+              </label>
+
+              {!multi ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
+                  {slots[0] ? (
+                    <img src={slots[0].preview} alt="" style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--border)' }} />
+                  ) : (
+                    <div style={{ width: 56, height: 56, borderRadius: 8, border: '1px dashed var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, color: 'var(--text-faint)' }}>
+                      📷
+                    </div>
+                  )}
+                  <label style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '7px 12px', fontSize: 12.5, cursor: 'pointer' }}>
+                    {slots[0] ? 'Change' : 'Add photo'}
+                    <input type="file" accept="image/*" onChange={handleAddFiles} disabled={uploadingPhoto} style={{ display: 'none' }} />
+                  </label>
+                  {slots[0] && (
+                    <button type="button" onClick={() => removeSlot(0)} style={{ background: 'none', border: 'none', color: 'var(--danger)', fontSize: 12.5, cursor: 'pointer' }}>
+                      Remove
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8, marginBottom: 6 }}>
+                    {slots.map((sl, i) => (
+                      <div key={sl.key} data-photo-tile style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 4, background: 'var(--bg)' }}>
+                        <div style={{ position: 'relative' }}>
+                          <img src={sl.preview} alt={`Photo ${i + 1}`} style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 6, display: 'block' }} />
+                          {i === 0 && <span style={{ position: 'absolute', top: 4, left: 4, background: 'var(--orange)', color: '#fff', fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 4 }}>Cover</span>}
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 2, marginTop: 4 }}>
+                          <button type="button" aria-label={`Move photo ${i + 1} earlier`} disabled={i === 0} onClick={() => moveSlot(i, i - 1)} style={tinyBtn}>◀</button>
+                          <button type="button" aria-label={`Move photo ${i + 1} later`} disabled={i === slots.length - 1} onClick={() => moveSlot(i, i + 1)} style={tinyBtn}>▶</button>
+                          <button type="button" aria-label={`Remove photo ${i + 1}`} onClick={() => removeSlot(i)} style={{ ...tinyBtn, color: 'var(--danger)' }}>✕</button>
+                        </div>
+                        {i > 0 && <button type="button" onClick={() => coverSlot(i)} style={{ ...tinyBtn, width: '100%', marginTop: 3 }}>Make cover</button>}
+                      </div>
+                    ))}
+                    {slots.length < MAX_PRODUCT_PHOTOS && (
+                      <label style={{ border: '1px dashed var(--border)', borderRadius: 8, minHeight: 96, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer', textAlign: 'center', padding: 4 }}>
+                        <span style={{ fontSize: 22, lineHeight: 1 }}>＋</span>
+                        <span>Add photos</span>
+                        <input type="file" accept="image/*" multiple onChange={handleAddFiles} disabled={uploadingPhoto} style={{ display: 'none' }} />
+                      </label>
+                    )}
                   </div>
-                )}
-                <label style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '7px 12px', fontSize: 12.5, cursor: 'pointer' }}>
-                  {photoPreview ? 'Change' : 'Add photo'}
-                  <input type="file" accept="image/*" onChange={handlePhotoChange} disabled={uploadingPhoto} style={{ display: 'none' }} />
-                </label>
-                {photoPreview && (
-                  <button type="button" onClick={clearPhoto} style={{ background: 'none', border: 'none', color: 'var(--danger)', fontSize: 12.5, cursor: 'pointer' }}>
-                    Remove
-                  </button>
-                )}
-              </div>
-              <p style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: -2, marginBottom: 14 }}>
-                Shown on the public catalogue if this product is set to "Show in online catalogue" below. Under {maxUploadMb}MB.
+                  <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '0 0 4px' }}>{slots.length} of {MAX_PRODUCT_PHOTOS} photos. The first is the cover, shown on the shop page.</p>
+                </div>
+              )}
+
+              {photoNotice && <p role="status" style={{ fontSize: 12, color: 'var(--danger)', margin: '4px 0' }}>{photoNotice}</p>}
+              {!online && isEdit && (
+                <p role="status" style={{ fontSize: 12, color: 'var(--orange-dark)', margin: '4px 0' }}>You are offline. Your other changes will be saved, but photo changes need an internet connection: make them again when you are back online.</p>
+              )}
+              <p style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2, marginBottom: 14 }}>
+                Shown on the public catalogue if this product is set to "Show in online catalogue" below. Big photos are shrunk automatically; each must end up under {maxUploadMb}MB.
               </p>
             </>
           )}
@@ -345,7 +483,7 @@ export default function ProductForm({ business, product, familyId, familyName, o
 
           <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
             <button type="submit" disabled={saving} style={{ background: 'var(--orange)', color: '#fff', border: 'none', padding: '10px 18px', borderRadius: 6, fontWeight: 700, cursor: 'pointer' }}>
-              {uploadingPhoto ? 'Uploading photo…' : saving ? 'Saving…' : isEdit ? 'Save changes' : form.type === 'service' ? 'Add service' : 'Add product'}
+              {uploadingPhoto ? (uploadProgress || 'Uploading photo…') : saving ? 'Saving…' : isEdit ? 'Save changes' : form.type === 'service' ? 'Add service' : 'Add product'}
             </button>
             <button type="button" onClick={onClose} style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text)', padding: '10px 18px', borderRadius: 6, cursor: 'pointer' }}>
               Cancel
@@ -369,3 +507,4 @@ const inputStyle = {
   width: '100%', padding: '9px 11px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 14,
   boxSizing: 'border-box', background: 'var(--bg)', color: 'var(--text)',
 };
+const tinyBtn = { background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 5, color: 'var(--text)', fontSize: 11, lineHeight: 1, padding: '5px 6px', cursor: 'pointer' };

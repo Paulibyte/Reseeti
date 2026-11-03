@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { photosOf } from '../../../lib/productPhotos';
 
 function formatNaira(n) {
   return `₦${Number(n || 0).toLocaleString()}`;
@@ -28,8 +29,15 @@ const SHOP_CSS = `
 .rsh-list{display:flex;flex-direction:column;gap:8px;max-width:820px;margin:0 auto}
 .rsh-overlay{position:fixed;inset:0;background:rgba(26,42,74,.5);display:flex;align-items:flex-end;justify-content:center;z-index:80}
 .rsh-sheet{background:#fff;width:100%;max-width:520px;max-height:92vh;border-radius:16px 16px 0 0;display:flex;flex-direction:column;overflow:hidden}
-.rsh-media{flex:0 0 auto;height:clamp(170px,32vh,300px);background:#f7f3ec;display:flex;align-items:center;justify-content:center;overflow:hidden}
-.rsh-media img{width:100%;height:100%;object-fit:contain;display:block;background:#fff}
+.rsh-media{flex:0 0 auto;height:clamp(170px,32vh,300px);background:#f7f3ec;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative}
+.rsh-media>img{width:100%;height:100%;object-fit:contain;display:block;background:#fff}
+.rsh-nav{position:absolute;top:50%;transform:translateY(-50%);width:34px;height:34px;border-radius:50%;border:none;background:rgba(255,255,255,.9);color:#1a2a4a;font-size:22px;line-height:1;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.25);padding:0}
+.rsh-prev{left:8px}.rsh-next{right:8px}
+.rsh-count{position:absolute;top:8px;left:8px;background:rgba(26,42,74,.78);color:#fff;font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:999px}
+.rsh-thumbs{position:absolute;left:0;right:0;bottom:0;display:flex;gap:6px;padding:14px 8px 6px;overflow-x:auto;background:linear-gradient(rgba(0,0,0,0),rgba(0,0,0,.3))}
+.rsh-thumb{flex:0 0 auto;width:42px;height:42px;padding:0;border:2px solid rgba(255,255,255,.6);border-radius:6px;overflow:hidden;background:#fff;cursor:pointer;opacity:.85}
+.rsh-thumb.on{border-color:#fff;opacity:1;box-shadow:0 0 0 2px #1a2a4a}
+.rsh-thumb img{width:100%;height:100%;object-fit:cover;display:block}
 .rsh-sheet:focus{outline:none}
 .rsh-ph{font-size:48px}
 .rsh-info{display:flex;flex-direction:column;min-height:0;min-width:0;flex:1 1 auto}
@@ -122,6 +130,10 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
   }, [filtered, sort]);
 
   const sheetRef = useRef(null);
+  // Which photo of the open item is showing, and where a swipe began.
+  const [photoIdx, setPhotoIdx] = useState(0);
+  const swipeStart = useRef(null);
+  useEffect(() => { setPhotoIdx(0); }, [detailProduct && detailProduct.id]);
   useEffect(() => {
     if (!detailProduct) return undefined;
     // keyboard and screen-reader users start inside the product view
@@ -424,13 +436,20 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
                         onClick={() => setDetailProduct(p)}
                         style={{ display: 'block', width: '100%', border: 'none', background: 'none', padding: 0, cursor: 'pointer', textAlign: 'left' }}
                       >
-                        {p.photo_url ? (
-                          <img src={p.photo_url} alt="" loading="lazy" style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'contain', background: '#fff', display: 'block' }} />
-                        ) : (
-                          <div style={{ width: '100%', aspectRatio: '1 / 1', background: '#f5f0e8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28 }}>
-                            🛍️
-                          </div>
-                        )}
+                        <div style={{ position: 'relative' }}>
+                          {photosOf(p)[0] ? (
+                            <img src={photosOf(p)[0]} alt="" loading="lazy" style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'contain', background: '#fff', display: 'block' }} />
+                          ) : (
+                            <div style={{ width: '100%', aspectRatio: '1 / 1', background: '#f5f0e8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28 }}>
+                              🛍️
+                            </div>
+                          )}
+                          {photosOf(p).length > 1 && (
+                            <span data-photo-count style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(26,42,74,.78)', color: '#fff', fontSize: 11, fontWeight: 700, padding: '2px 7px', borderRadius: 999 }}>
+                              📷 {photosOf(p).length}
+                            </span>
+                          )}
+                        </div>
                         <div style={{ padding: '8px 10px 4px' }}>
                           <p style={{ margin: 0, fontWeight: 700, fontSize: 13.5, color: '#1a2a4a', lineHeight: 1.3 }}>
                             {p.name}{sizeLabel ? ` (${sizeLabel})` : ''}
@@ -531,14 +550,50 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
         const outOfStock = !isService && Number(p.stock_qty) <= 0;
         const qty = cart[p.id] || 0;
         const sizeLabel = p.unit_value ? `${p.unit_value}${p.unit || ''}` : (p.unit || null);
+        const photos = photosOf(p);
+        const idx = Math.min(photoIdx, Math.max(0, photos.length - 1));
+        const step = (by) => setPhotoIdx((i) => (Math.min(i, photos.length - 1) + by + photos.length) % photos.length);
         return (
           <div className="rsh-overlay" role="dialog" aria-modal="true" aria-label={p.name} onClick={() => setDetailProduct(null)}>
-            <div className="rsh-sheet" ref={sheetRef} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
-              <div className="rsh-media">
-                {p.photo_url ? (
-                  <img src={p.photo_url} alt={p.name} />
+            <div
+              className="rsh-sheet"
+              ref={sheetRef}
+              tabIndex={-1}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                if (photos.length < 2) return;
+                if (e.key === 'ArrowLeft') { e.preventDefault(); step(-1); }
+                if (e.key === 'ArrowRight') { e.preventDefault(); step(1); }
+              }}
+            >
+              <div
+                className="rsh-media"
+                onTouchStart={(e) => { swipeStart.current = e.touches[0].clientX; }}
+                onTouchEnd={(e) => {
+                  if (swipeStart.current === null || photos.length < 2) return;
+                  const dx = e.changedTouches[0].clientX - swipeStart.current;
+                  swipeStart.current = null;
+                  if (Math.abs(dx) > 40) step(dx < 0 ? 1 : -1);
+                }}
+              >
+                {photos.length > 0 ? (
+                  <img src={photos[idx]} alt={photos.length > 1 ? `${p.name}, photo ${idx + 1} of ${photos.length}` : p.name} />
                 ) : (
                   <div className="rsh-ph" aria-hidden="true">🛍️</div>
+                )}
+                {photos.length > 1 && (
+                  <>
+                    <button type="button" className="rsh-nav rsh-prev" aria-label="Previous photo" onClick={() => step(-1)}>‹</button>
+                    <button type="button" className="rsh-nav rsh-next" aria-label="Next photo" onClick={() => step(1)}>›</button>
+                    <span className="rsh-count" aria-hidden="true">{idx + 1} / {photos.length}</span>
+                    <div className="rsh-thumbs" role="group" aria-label="Photos">
+                      {photos.map((u, i) => (
+                        <button key={u} type="button" className={`rsh-thumb${i === idx ? ' on' : ''}`} aria-label={`Show photo ${i + 1}`} aria-current={i === idx ? 'true' : undefined} onClick={() => setPhotoIdx(i)}>
+                          <img src={u} alt="" loading="lazy" />
+                        </button>
+                      ))}
+                    </div>
+                  </>
                 )}
               </div>
               <div className="rsh-info">

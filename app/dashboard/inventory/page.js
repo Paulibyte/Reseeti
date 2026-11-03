@@ -10,6 +10,7 @@ import { can } from '../../../lib/permissions';
 import { formatNaira } from '../../../lib/format';
 import { cacheGetAll, cacheSetAll } from '../../../lib/idbCache';
 import { useRealtimeSync } from '../../../lib/useRealtimeSync';
+import { photosOf } from '../../../lib/productPhotos';
 
 // Same reasoning as the customers list: paginate the rendered rows so a
 // large catalog doesn't mean a large number of mounted DOM nodes.
@@ -324,7 +325,14 @@ export default function InventoryPage() {
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                       {p.photo_url && (
-                        <img src={p.photo_url} alt="" style={{ width: 34, height: 34, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--border)', flexShrink: 0 }} />
+                        <span style={{ position: 'relative', display: 'inline-block', flexShrink: 0 }}>
+                          <img src={p.photo_url} alt="" style={{ width: 34, height: 34, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--border)', display: 'block' }} />
+                          {photosOf(p).length > 1 && (
+                            <span title={`${photosOf(p).length} photos`} aria-label={`${photosOf(p).length} photos`} style={{ position: 'absolute', right: -5, bottom: -5, background: 'var(--orange)', color: '#fff', fontSize: 10, fontWeight: 700, lineHeight: '14px', minWidth: 14, textAlign: 'center', padding: '0 3px', borderRadius: 8 }}>
+                              {photosOf(p).length}
+                            </span>
+                          )}
+                        </span>
                       )}
                       <div>
                         <p style={{ margin: 0, fontWeight: 600, color: 'var(--text)', fontSize: 14.5 }}>

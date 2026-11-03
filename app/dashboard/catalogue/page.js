@@ -90,7 +90,7 @@ export default function CataloguePage() {
   async function toggleJobtins() {
     const next = !business.jobtins_opt_in;
     if (next && !window.confirm(
-      `List ${business.name} on Jobtins?\n\nJobtins will show your shop's name, address, WhatsApp number and logo, and every product marked Visible, with its price, photo and description. It never sees your customers, invoices or stock counts.\n\nYou can switch this off at any time.`
+      `List ${business.name} on Jobtins?\n\nJobtins will show your shop's name, address, WhatsApp number and logo, and every product marked Visible, with its price, photos and description. It never sees your customers, invoices or stock counts.\n\nYou can switch this off at any time.`
     )) return;
     setJobtinsBusy(true);
     setJobtinsError('');
@@ -196,7 +196,7 @@ export default function CataloguePage() {
             <details style={{ marginTop: 12 }}>
               <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>What Jobtins can and can&apos;t see</summary>
               <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-                <li><b>Shown:</b> your shop name, address, WhatsApp number and logo, and each product marked Visible below, with its name, price, photo, description and whether it is in stock.</li>
+                <li><b>Shown:</b> your shop name, address, WhatsApp number and logo, and each product marked Visible below, with its name, price, photos, description and whether it is in stock.</li>
                 <li><b>Never shown:</b> your customers, invoices, payments, costs, or exact stock numbers.</li>
                 <li>Jobtins refreshes regularly, so changes — including removing your shop — can take a little while to appear there.</li>
               </ul>

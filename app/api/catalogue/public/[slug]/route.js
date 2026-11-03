@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '../../../../../lib/supabaseAdmin';
 import { rateLimit, requestIp } from '../../../../../lib/rateLimit';
+import { selectCatalogueProducts } from '../../../../../lib/catalogueProducts';
+import { photosOf } from '../../../../../lib/productPhotos';
 
 // Both are needed on any route that reads live data: without them Next
 // can serve a cached snapshot of the products (see app/shop/[slug]/page.js).
@@ -54,14 +56,13 @@ export async function GET(req, { params }) {
     return NextResponse.json({ error: 'unavailable' }, { status: 404 });
   }
 
-  const { data: products, error } = await supabase
-    .from('products')
-    .select('id, name, description, price, unit, unit_value, category, type, stock_qty, photo_url')
-    .eq('business_id', business.id)
-    .eq('show_in_catalogue', true)
-    .order('category')
-    .order('name')
-    .limit(5000);
+  // Each product also carries its list of photos (the first is the cover, which is also photo_url).
+  const { data: products, error } = await selectCatalogueProducts(
+    supabase,
+    business.id,
+    'id, name, description, price, unit, unit_value, category, type, stock_qty, photo_url',
+    { limit: 5000 },
+  );
 
   if (error) {
     return NextResponse.json({ error: 'server_error' }, { status: 500 });
@@ -91,6 +92,7 @@ export async function GET(req, { params }) {
         // A service has no stock to run out of.
         in_stock: p.type === 'service' || Number(p.stock_qty) > 0,
         photo_url: p.photo_url || null,
+        photos: photosOf(p),
       })),
     },
     { status: 200, headers: { 'Cache-Control': 'no-store' } }

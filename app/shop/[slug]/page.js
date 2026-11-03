@@ -1,5 +1,6 @@
 import { createAdminClient } from '../../../lib/supabaseAdmin';
 import ShopCart from './ShopCart';
+import { selectCatalogueProducts } from '../../../lib/catalogueProducts';
 
 // Next.js caches a server component's data fetches by default and
 // keeps serving that same snapshot on every subsequent visit unless
@@ -48,17 +49,16 @@ export default async function ShopPage({ params }) {
     );
   }
 
-  const { data: products } = await supabase
-    .from('products')
-    // `type` MUST be selected: ShopCart decides "out of stock" with
-    // `p.type !== 'service' && stock_qty <= 0`. Without it every product
-    // looked like a non-service, so a service (which has no stock count)
-    // showed as "Out of stock", greyed out, with no Add button.
-    .select('id, name, description, price, unit, unit_value, category, type, stock_qty, photo_url')
-    .eq('business_id', business.id)
-    .eq('show_in_catalogue', true)
-    .order('category')
-    .order('name');
+  // `type` MUST be selected: ShopCart decides "out of stock" with
+  // `p.type !== 'service' && stock_qty <= 0`. Without it every product
+  // looked like a non-service, so a service (which has no stock count)
+  // showed as "Out of stock", greyed out, with no Add button.
+  // `photos` (the gallery) is added by selectCatalogueProducts when the database has it.
+  const { data: products } = await selectCatalogueProducts(
+    supabase,
+    business.id,
+    'id, name, description, price, unit, unit_value, category, type, stock_qty, photo_url',
+  );
 
   // Fire-and-forget, deliberately not awaited — recording a page view
   // (Stage 47, for the new Catalogue section on Analytics) should never
