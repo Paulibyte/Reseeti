@@ -8,6 +8,7 @@ import DashboardShell from '../DashboardShell';
 import { can } from '../../../lib/permissions';
 import { formatNaira } from '../../../lib/format';
 import { csrfFetch } from '../../../lib/csrfFetch';
+import { MARKETPLACES } from '../../../lib/marketplaces';
 
 // Deliberately does NOT move the enable/disable toggle, WhatsApp number,
 // bank verification, or accent-color picker out of BusinessSettings —
@@ -30,8 +31,9 @@ export default function CataloguePage() {
   const [savingId, setSavingId] = useState(null);
   const [ordersCount, setOrdersCount] = useState(0);
   const [views30, setViews30] = useState(0);
-  const [jobtinsBusy, setJobtinsBusy] = useState(false);
-  const [jobtinsError, setJobtinsError] = useState('');
+  // one entry per marketplace: true while that switch is being saved, and the last problem it had
+  const [marketBusy, setMarketBusy] = useState({});
+  const [marketError, setMarketError] = useState({});
 
   useEffect(() => { load(); }, []);
 
@@ -83,29 +85,89 @@ export default function CataloguePage() {
     setProducts((prev) => prev.map((p) => (p.id === product.id ? { ...p, show_in_catalogue: next } : p)));
   }
 
-  // Opting in to Jobtins (a separate shopping site that shows products
-  // from Reseeti shops) is the owner's choice and nothing is listed until
-  // they make it — see schema_stage60.sql. The route re-checks everything
-  // here (owner only, Pro, catalogue on, WhatsApp number set).
-  async function toggleJobtins() {
-    const next = !business.jobtins_opt_in;
+  // Opting in to a marketplace (a separate shopping site that shows products from Reseeti shops, such as Jobtins or
+  // HomeEase Nigeria) is the owner's choice, made separately for each, and nothing is listed until they make it. See
+  // schema_stage60.sql and schema_stage62.sql. The route re-checks everything here (owner only, Pro, catalogue on,
+  // WhatsApp number set).
+  async function toggleMarket(market) {
+    const next = !business[market.optIn];
     if (next && !window.confirm(
-      `List ${business.name} on Jobtins?\n\nJobtins will show your shop's name, address, WhatsApp number and logo, and every product marked Visible, with its price, photos and description. It never sees your customers, invoices or stock counts.\n\nYou can switch this off at any time.`
+      `List ${business.name} on ${market.name}?\n\n${market.name} will show your shop's name, address, WhatsApp number and logo, and every product marked Visible, with its price, photos and description. It never sees your customers, invoices or stock counts.\n\nYou can switch this off at any time.`
     )) return;
-    setJobtinsBusy(true);
-    setJobtinsError('');
-    const res = await csrfFetch('/api/catalogue/jobtins', {
+    setMarketBusy((m) => ({ ...m, [market.key]: true }));
+    setMarketError((m) => ({ ...m, [market.key]: '' }));
+    const res = await csrfFetch(`/api/catalogue/${market.key}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ enabled: next }),
     });
     const data = await res.json().catch(() => ({}));
-    setJobtinsBusy(false);
+    setMarketBusy((m) => ({ ...m, [market.key]: false }));
     if (!res.ok) {
-      setJobtinsError(data.error || 'Could not save that. Please try again.');
+      setMarketError((m) => ({ ...m, [market.key]: data.error || 'Could not save that. Please try again.' }));
       return;
     }
-    setBusiness((b) => ({ ...b, jobtins_opt_in: next }));
+    setBusiness((b) => ({ ...b, [market.optIn]: next }));
+  }
+
+  // The card for one marketplace. Jobtins is always offered; the others only once the database has their column
+  // (so an app deployed before its database update shows nothing broken, just no card yet).
+  function marketCard(market) {
+    const listed = !!business[market.optIn];
+    const busy = !!marketBusy[market.key];
+    const blocked = !listed && (!business.catalogue_enabled || !business.whatsapp_number);
+    return (
+      <div key={market.key} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '16px 18px', marginBottom: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+          <div style={{ flex: '1 1 320px', minWidth: 0 }}>
+            <h2 style={{ fontSize: 16, margin: '0 0 4px', display: 'flex', alignItems: 'center', gap: 8 }}>
+              List on {market.name}
+              {listed && (
+                <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 999, background: 'var(--success-bg)', color: 'var(--success)' }}>Listed</span>
+              )}
+            </h2>
+            <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text-muted)' }}>
+              {market.blurb}{' '}
+              Shoppers who tap Order are sent back to your own shop link, so orders and payments still come to you.
+            </p>
+          </div>
+          {role === 'owner' ? (
+            <button
+              onClick={() => toggleMarket(market)}
+              disabled={busy || blocked}
+              style={{
+                background: listed ? 'var(--surface)' : 'var(--orange)',
+                color: listed ? 'var(--text)' : '#fff',
+                border: listed ? '1px solid var(--border)' : 'none',
+                borderRadius: 8, padding: '10px 18px', fontWeight: 700, cursor: 'pointer', flexShrink: 0,
+                opacity: busy || blocked ? 0.55 : 1,
+              }}
+            >
+              {busy ? 'Saving…' : listed ? `Remove from ${market.name}` : `List my shop on ${market.name}`}
+            </button>
+          ) : (
+            <span style={{ fontSize: 12.5, color: 'var(--text-faint)', flexShrink: 0 }}>Only the owner can change this.</span>
+          )}
+        </div>
+
+        {role === 'owner' && !listed && !business.catalogue_enabled && (
+          <p style={{ margin: '10px 0 0', fontSize: 12.5, color: 'var(--text-muted)' }}>Turn on your catalogue in Settings first.</p>
+        )}
+        {role === 'owner' && !listed && business.catalogue_enabled && !business.whatsapp_number && (
+          <p style={{ margin: '10px 0 0', fontSize: 12.5, color: 'var(--text-muted)' }}>Add your WhatsApp number in Settings first — shoppers order through it.</p>
+        )}
+        {marketError[market.key] && <p role="alert" style={{ margin: '10px 0 0', fontSize: 13, color: 'var(--danger)' }}>{marketError[market.key]}</p>}
+
+        <details style={{ marginTop: 12 }}>
+          <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>What {market.name} can and can&apos;t see</summary>
+          <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+            <li><b>Shown:</b> your shop name, address, WhatsApp number and logo, and each product marked Visible below, with its name, price, photos, description and whether it is in stock.</li>
+            <li><b>Never shown:</b> your customers, invoices, payments, costs, or exact stock numbers.</li>
+            <li>{market.name} refreshes regularly, so changes — including removing your shop — can take a little while to appear there.</li>
+          </ul>
+        </details>
+      </div>
+    );
   }
 
   const filtered = useMemo(() => {
@@ -152,56 +214,7 @@ export default function CataloguePage() {
             {!business.catalogue_enabled && 'Your catalogue is currently turned off — turn it on in Settings.'}
           </p>
 
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '16px 18px', marginBottom: 20 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
-              <div style={{ flex: '1 1 320px', minWidth: 0 }}>
-                <h2 style={{ fontSize: 16, margin: '0 0 4px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  List on Jobtins
-                  {business.jobtins_opt_in && (
-                    <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 999, background: 'var(--success-bg)', color: 'var(--success)' }}>Listed</span>
-                  )}
-                </h2>
-                <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text-muted)' }}>
-                  Jobtins is a shopping site that shows products from Reseeti shops in one place, so more people can find yours.
-                  Shoppers who tap Order are sent back to your own shop link, so orders and payments still come to you.
-                </p>
-              </div>
-              {role === 'owner' ? (
-                <button
-                  onClick={toggleJobtins}
-                  disabled={jobtinsBusy || (!business.jobtins_opt_in && (!business.catalogue_enabled || !business.whatsapp_number))}
-                  style={{
-                    background: business.jobtins_opt_in ? 'var(--surface)' : 'var(--orange)',
-                    color: business.jobtins_opt_in ? 'var(--text)' : '#fff',
-                    border: business.jobtins_opt_in ? '1px solid var(--border)' : 'none',
-                    borderRadius: 8, padding: '10px 18px', fontWeight: 700, cursor: 'pointer', flexShrink: 0,
-                    opacity: jobtinsBusy || (!business.jobtins_opt_in && (!business.catalogue_enabled || !business.whatsapp_number)) ? 0.55 : 1,
-                  }}
-                >
-                  {jobtinsBusy ? 'Saving…' : business.jobtins_opt_in ? 'Remove from Jobtins' : 'List my shop on Jobtins'}
-                </button>
-              ) : (
-                <span style={{ fontSize: 12.5, color: 'var(--text-faint)', flexShrink: 0 }}>Only the owner can change this.</span>
-              )}
-            </div>
-
-            {role === 'owner' && !business.jobtins_opt_in && !business.catalogue_enabled && (
-              <p style={{ margin: '10px 0 0', fontSize: 12.5, color: 'var(--text-muted)' }}>Turn on your catalogue in Settings first.</p>
-            )}
-            {role === 'owner' && !business.jobtins_opt_in && business.catalogue_enabled && !business.whatsapp_number && (
-              <p style={{ margin: '10px 0 0', fontSize: 12.5, color: 'var(--text-muted)' }}>Add your WhatsApp number in Settings first — shoppers order through it.</p>
-            )}
-            {jobtinsError && <p role="alert" style={{ margin: '10px 0 0', fontSize: 13, color: 'var(--danger)' }}>{jobtinsError}</p>}
-
-            <details style={{ marginTop: 12 }}>
-              <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>What Jobtins can and can&apos;t see</summary>
-              <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-                <li><b>Shown:</b> your shop name, address, WhatsApp number and logo, and each product marked Visible below, with its name, price, photos, description and whether it is in stock.</li>
-                <li><b>Never shown:</b> your customers, invoices, payments, costs, or exact stock numbers.</li>
-                <li>Jobtins refreshes regularly, so changes — including removing your shop — can take a little while to appear there.</li>
-              </ul>
-            </details>
-          </div>
+          {Object.values(MARKETPLACES).filter((m) => m.key === 'jobtins' || m.optIn in business).map(marketCard)}
 
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
             <div style={statCardStyle}>

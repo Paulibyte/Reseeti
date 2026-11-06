@@ -19,6 +19,8 @@ const EVENT_LABELS = {
   invoice_payment_refunded: 'Payment refunded',
   jobtins_opt_in: 'Listed on Jobtins',
   jobtins_opt_out: 'Removed from Jobtins',
+  homeease_opt_in: 'Listed on HomeEase Nigeria',
+  homeease_opt_out: 'Removed from HomeEase Nigeria',
   reminder_sent: 'Reminder sent (WhatsApp link)',
   sms_reminder_sent: 'SMS reminder sent',
   sms_reminder_failed: 'SMS reminder failed',
