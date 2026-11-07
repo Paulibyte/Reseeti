@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '../../../../lib/supabaseAdmin';
 import { rateLimit, requestIp } from '../../../../lib/rateLimit';
 import { initializeTransaction } from '../../../../lib/paystack';
+import { queryWithOptionalColumns } from '../../../../lib/catalogueProducts';
+import { minOrderQty, unitPriceFor, lineTotal } from '../../../../lib/wholesalePricing';
 
 // Same "trust nothing from the client" posture as /api/catalogue/orders
 // (the WhatsApp-order path) — every price is read fresh from the
@@ -52,17 +54,18 @@ export async function POST(req) {
   }
 
   const productIds = [...new Set(items.map((it) => it.productId).filter(Boolean))];
-  const { data: products } = await admin
-    .from('products')
-    .select('id, name, price, unit, unit_value, type, stock_qty')
-    .eq('business_id', business.id)
-    .eq('show_in_catalogue', true)
-    .in('id', productIds);
+  // The wholesale columns are asked for too, but only if the database has them (see lib/catalogueProducts.js).
+  const { data: products } = await queryWithOptionalColumns(
+    (columns) => admin.from('products').select(columns).eq('business_id', business.id).eq('show_in_catalogue', true).in('id', productIds),
+    'id, name, price, unit, unit_value, type, stock_qty',
+    ['wholesale'],
+  );
 
   const productMap = Object.fromEntries((products || []).map((p) => [p.id, p]));
 
   const orderItems = [];
   const soldOut = [];
+  const belowMinimum = [];
   let total = 0;
   for (const it of items) {
     const product = productMap[it.productId];
@@ -80,8 +83,16 @@ export async function POST(req) {
       if (!soldOut.includes(product.name)) soldOut.push(product.name);
       continue;
     }
-    orderItems.push({ product_id: product.id, name: product.name, unit: product.unit, unit_value: product.unit_value, qty, price: product.price });
-    total += product.price * qty;
+    // A wholesale product has a smallest order. Like "sold out", this is a real situation the customer must be told about,
+    // not a tampered request to drop quietly.
+    const minimum = minOrderQty(product);
+    if (qty < minimum) {
+      belowMinimum.push({ name: product.name, minimum });
+      continue;
+    }
+    // The price of one unit depends on how many are bought (bulk prices), worked out here from the database, never from the page.
+    orderItems.push({ product_id: product.id, name: product.name, unit: product.unit, unit_value: product.unit_value, qty, price: unitPriceFor(product, qty) });
+    total += lineTotal(product, qty);
   }
 
   if (soldOut.length > 0) {
@@ -91,6 +102,14 @@ export async function POST(req) {
       { error: `Sorry, ${names} ${one ? 'is' : 'are'} out of stock right now. Please remove ${one ? 'it' : 'them'} from your order and try again.`, soldOut },
       { status: 409 }
     );
+  }
+
+  if (belowMinimum.length > 0) {
+    const list = belowMinimum.map((b) => `${b.name} (minimum ${b.minimum})`).join(', ');
+    const error = belowMinimum.length === 1
+      ? `The minimum order for ${belowMinimum[0].name} is ${belowMinimum[0].minimum}. Please increase the quantity and try again.`
+      : `Some items are below their minimum order: ${list}. Please increase the quantities and try again.`;
+    return NextResponse.json({ error, belowMinimum }, { status: 409 });
   }
 
   if (orderItems.length === 0) {

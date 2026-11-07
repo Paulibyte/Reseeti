@@ -2,9 +2,25 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { photosOf } from '../../../lib/productPhotos';
+import { isBulk, minOrderQty, tiersOf, unitPriceFor, lineTotal, lowestUnitPrice } from '../../../lib/wholesalePricing';
 
 function formatNaira(n) {
   return `₦${Number(n || 0).toLocaleString()}`;
+}
+
+// Bulk selling (see lib/wholesalePricing.js): the short note under a price, and the date a price last changed. The date is built by
+// hand in UTC so the server and the browser always write the same text (a locale-formatted date can differ between them).
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function priceNote(p) {
+  const bits = [];
+  const min = minOrderQty(p);
+  if (min > 1) bits.push(`Min. ${min}`);
+  if (tiersOf(p).length > 0) bits.push(`from ${formatNaira(lowestUnitPrice(p))} in bulk`);
+  return bits.join(' · ');
+}
+function shortDate(iso) {
+  const d = iso ? new Date(iso) : null;
+  return d && !Number.isNaN(d.getTime()) ? `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}` : '';
 }
 
 // wa.me wants digits only, no '+' — same E.164-style normalization used
@@ -179,16 +195,32 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
       .filter((row) => row.product && row.qty > 0);
   }, [cart, products]);
 
-  const total = cartItems.reduce((sum, row) => sum + row.product.price * row.qty, 0);
+  const total = cartItems.reduce((sum, row) => sum + lineTotal(row.product, row.qty), 0);
   const itemCount = cartItems.reduce((sum, row) => sum + row.qty, 0);
 
   function setQty(productId, qty) {
     setCart((prev) => ({ ...prev, [productId]: Math.max(0, qty) }));
   }
+  // The first "Add" puts the smallest allowed order in the cart (1 for an ordinary product), and going below that
+  // minimum with "−" takes the item out, so a cart can never hold a quantity the shop would refuse.
+  const addFirst = (p) => setQty(p.id, minOrderQty(p));
+  const stepDown = (p, qty) => setQty(p.id, qty - 1 < minOrderQty(p) ? 0 : qty - 1);
+
+  // When a customer is close to a cheaper bulk price, say so once, honestly.
+  const bulkHint = useMemo(() => {
+    let best = null;
+    for (const row of cartItems) {
+      const next = tiersOf(row.product).find((t) => t.min_qty > row.qty);
+      if (!next) continue;
+      const more = Math.ceil(next.min_qty - row.qty);
+      if (!best || more < best.more) best = { name: row.product.name, more, price: next.price };
+    }
+    return best;
+  }, [cartItems]);
 
   function buildWhatsAppUrl() {
     const lines = cartItems.map(
-      (row, i) => `${i + 1}. ${row.product.name}${row.product.unit_value ? ` (${row.product.unit_value}${row.product.unit || ''})` : ''} x${row.qty} — ${formatNaira(row.product.price * row.qty)}`
+      (row, i) => `${i + 1}. ${row.product.name}${row.product.unit_value ? ` (${row.product.unit_value}${row.product.unit || ''})` : ''} x${row.qty}${isBulk(row.product) ? ` @ ${formatNaira(unitPriceFor(row.product, row.qty))} each` : ''} — ${formatNaira(lineTotal(row.product, row.qty))}`
     );
     const message = [
       `New order from ${businessName}'s catalogue:`,
@@ -455,7 +487,7 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
                             {p.name}{sizeLabel ? ` (${sizeLabel})` : ''}
                           </p>
                           <p style={{ margin: '2px 0 0', fontSize: 12.5, color: '#8a8175' }}>
-                            {formatNaira(p.price)}{outOfStock ? ' · Out of stock' : ''}
+                            {formatNaira(p.price)}{priceNote(p) ? ` · ${priceNote(p)}` : ''}{outOfStock ? ' · Out of stock' : ''}
                           </p>
                         </div>
                       </button>
@@ -463,14 +495,14 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
                         <div style={{ padding: '4px 10px 10px' }}>
                           {qty === 0 ? (
                             <button
-                              onClick={() => setQty(p.id, 1)}
+                              onClick={() => addFirst(p)}
                               style={{ width: '100%', background: accent, color: '#fff', border: 'none', borderRadius: 8, padding: '7px', fontWeight: 700, fontSize: 12.5, cursor: 'pointer' }}
                             >
                               Add
                             </button>
                           ) : (
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-                              <button onClick={() => setQty(p.id, qty - 1)} style={stepperBtn}>−</button>
+                              <button onClick={() => stepDown(p, qty)} style={stepperBtn}>−</button>
                               <span style={{ minWidth: 18, textAlign: 'center', fontWeight: 700 }}>{qty}</span>
                               <button onClick={() => setQty(p.id, qty + 1)} style={stepperBtn}>+</button>
                             </div>
@@ -515,21 +547,21 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
                             {p.name}{sizeLabel ? ` (${sizeLabel})` : ''}
                           </p>
                           <p style={{ margin: '2px 0 0', fontSize: 13, color: '#8a8175' }}>
-                            {formatNaira(p.price)}{outOfStock ? ' · Out of stock' : ''}
+                            {formatNaira(p.price)}{priceNote(p) ? ` · ${priceNote(p)}` : ''}{outOfStock ? ' · Out of stock' : ''}
                           </p>
                         </div>
                       </button>
                       {!outOfStock && (
                         qty === 0 ? (
                           <button
-                            onClick={() => setQty(p.id, 1)}
+                            onClick={() => addFirst(p)}
                             style={{ background: accent, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 700, fontSize: 13, cursor: 'pointer', flexShrink: 0 }}
                           >
                             Add
                           </button>
                         ) : (
                           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-                            <button onClick={() => setQty(p.id, qty - 1)} style={stepperBtn}>−</button>
+                            <button onClick={() => stepDown(p, qty)} style={stepperBtn}>−</button>
                             <span style={{ minWidth: 18, textAlign: 'center', fontWeight: 700 }}>{qty}</span>
                             <button onClick={() => setQty(p.id, qty + 1)} style={stepperBtn}>+</button>
                           </div>
@@ -606,6 +638,23 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
                     <button className="rsh-close" onClick={() => setDetailProduct(null)} aria-label="Close">×</button>
                   </div>
                   <p className="rsh-price" style={{ color: accent }}>{formatNaira(p.price)}</p>
+                  {isBulk(p) && (tiersOf(p).length > 0 || minOrderQty(p) > 1 || p.price_updated_at) && (
+                    <div className="rsh-bulk" data-testid="bulk-box" style={{ margin: '6px 0 10px', padding: '10px 12px', background: '#f6f1e8', borderRadius: 10, fontSize: 13.5, color: '#1a2a4a' }}>
+                      {tiersOf(p).length > 0 && (
+                        <>
+                          <p style={{ margin: '0 0 4px', fontWeight: 700 }}>Bulk prices</p>
+                          <ul style={{ margin: 0, paddingLeft: 18 }}>
+                            <li>{minOrderQty(p)}+ : {formatNaira(p.price)} each</li>
+                            {tiersOf(p).map((t) => (
+                              <li key={t.min_qty}>{t.min_qty}+ : {formatNaira(t.price)} each</li>
+                            ))}
+                          </ul>
+                        </>
+                      )}
+                      {minOrderQty(p) > 1 && <p style={{ margin: '6px 0 0' }}>Minimum order: {minOrderQty(p)}</p>}
+                      {shortDate(p.price_updated_at) && <p style={{ margin: '6px 0 0', color: '#8a8175', fontSize: 12.5 }}>Price updated {shortDate(p.price_updated_at)}</p>}
+                    </div>
+                  )}
                   <p className="rsh-status" style={{ color: outOfStock ? '#b42318' : '#2d7a4f' }}>
                     {isService ? 'Service' : outOfStock ? 'Out of stock' : 'In stock'}
                   </p>
@@ -619,12 +668,12 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
                 {!outOfStock && (
                   <div className="rsh-foot">
                     {qty === 0 ? (
-                      <button onClick={() => setQty(p.id, 1)} className="rsh-add" style={{ background: accent }}>
+                      <button onClick={() => addFirst(p)} className="rsh-add" style={{ background: accent }}>
                         Add to order
                       </button>
                     ) : (
                       <div className="rsh-step">
-                        <button onClick={() => setQty(p.id, qty - 1)} style={stepperBtn}>−</button>
+                        <button onClick={() => stepDown(p, qty)} style={stepperBtn}>−</button>
                         <span style={{ minWidth: 24, textAlign: 'center', fontWeight: 700, fontSize: 16 }}>{qty}</span>
                         <button onClick={() => setQty(p.id, qty + 1)} style={stepperBtn}>+</button>
                       </div>
@@ -645,6 +694,11 @@ export default function ShopCart({ slug, businessName, businessAddress, whatsapp
                 <div>
                   <p style={{ margin: 0, fontSize: 12, color: '#8a8175' }}>{itemCount} item{itemCount === 1 ? '' : 's'}</p>
                   <p style={{ margin: 0, fontWeight: 800, fontSize: 16, color: '#1a2a4a' }}>{formatNaira(total)}</p>
+                  {bulkHint && (
+                    <p data-testid="bulk-hint" style={{ margin: '2px 0 0', fontSize: 12, color: '#2d7a4f' }}>
+                      Add {bulkHint.more} more {bulkHint.name} to pay {formatNaira(bulkHint.price)} each
+                    </p>
+                  )}
                 </div>
                 <button
                   onClick={startCheckout}

@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '../../../../lib/supabaseAdmin';
 import { rateLimit, requestIp } from '../../../../lib/rateLimit';
+import { queryWithOptionalColumns } from '../../../../lib/catalogueProducts';
+import { unitPriceFor, lineTotal } from '../../../../lib/wholesalePricing';
 
 // No auth check at all here on purpose — a customer browsing the public
 // catalogue (app/shop/[slug]) has no Supabase session, by design. This
@@ -54,12 +56,11 @@ export async function POST(req) {
     return NextResponse.json({ error: 'No valid items in cart' }, { status: 400 });
   }
 
-  const { data: products } = await admin
-    .from('products')
-    .select('id, name, price, unit, unit_value')
-    .eq('business_id', business.id)
-    .eq('show_in_catalogue', true)
-    .in('id', productIds);
+  const { data: products } = await queryWithOptionalColumns(
+    (columns) => admin.from('products').select(columns).eq('business_id', business.id).eq('show_in_catalogue', true).in('id', productIds),
+    'id, name, price, unit, unit_value',
+    ['wholesale'],
+  );
 
   const productMap = Object.fromEntries((products || []).map((p) => [p.id, p]));
 
@@ -75,9 +76,9 @@ export async function POST(req) {
       unit: product.unit,
       unit_value: product.unit_value,
       qty,
-      price: product.price, // real, current price — never from the request
+      price: unitPriceFor(product, qty), // real, current price for this quantity (bulk prices included) — never from the request
     });
-    total += product.price * qty;
+    total += lineTotal(product, qty);
   }
 
   if (orderItems.length === 0) {

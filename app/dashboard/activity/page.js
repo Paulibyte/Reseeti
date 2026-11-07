@@ -21,6 +21,8 @@ const EVENT_LABELS = {
   jobtins_opt_out: 'Removed from Jobtins',
   homeease_opt_in: 'Listed on HomeEase Nigeria',
   homeease_opt_out: 'Removed from HomeEase Nigeria',
+  foodmarket_opt_in: 'Listed on Owerri Food Market',
+  foodmarket_opt_out: 'Removed from Owerri Food Market',
   reminder_sent: 'Reminder sent (WhatsApp link)',
   sms_reminder_sent: 'SMS reminder sent',
   sms_reminder_failed: 'SMS reminder failed',

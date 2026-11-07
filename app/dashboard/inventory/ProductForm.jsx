@@ -7,6 +7,7 @@ import { queueEdit } from '../../../lib/offlineQueue';
 import { getMaxImageUploadMb, getMaxImageUploadBytes } from '../../../lib/maxUploadSize';
 import { MAX_PRODUCT_PHOTOS, photosOf, photosChanged, movePhoto, makeCover, newPhotoPath, storagePathFor } from '../../../lib/productPhotos';
 import { prepareImage } from '../../../lib/compressImage';
+import { SALE_MODES, SALE_MODE_LABELS, MAX_TIERS, MAX_MOQ, validateWholesale } from '../../../lib/wholesalePricing';
 
 export default function ProductForm({ business, product, familyId, familyName, onClose, onSaved }) {
   const supabase = createClient();
@@ -25,6 +26,10 @@ export default function ProductForm({ business, product, familyId, familyName, o
     unit: product?.unit || '',
     unit_value: product?.unit_value ?? '',
     show_in_catalogue: product?.show_in_catalogue || false,
+    // Bulk selling (lib/wholesalePricing.js). A product from before stage 63 has none of these and is simply retail.
+    sale_mode: SALE_MODES.includes(product?.sale_mode) ? product.sale_mode : 'retail',
+    moq: product?.moq ?? 1,
+    tiers: Array.isArray(product?.price_tiers) ? product.price_tiers.map((t) => ({ min_qty: String(t.min_qty ?? ''), price: String(t.price ?? '') })) : [],
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -119,6 +124,20 @@ export default function ProductForm({ business, product, familyId, familyName, o
   function set(field, value) {
     setForm((f) => ({ ...f, [field]: value }));
   }
+  function setTier(i, field, value) {
+    setForm((f) => ({ ...f, tiers: f.tiers.map((t, n) => (n === i ? { ...t, [field]: value } : t)) }));
+  }
+  function addTier() {
+    setForm((f) => (f.tiers.length >= MAX_TIERS ? f : { ...f, tiers: [...f.tiers, { min_qty: '', price: '' }] }));
+  }
+  function removeTier(i) {
+    setForm((f) => ({ ...f, tiers: f.tiers.filter((_, n) => n !== i) }));
+  }
+
+  // What the owner has entered for bulk selling, checked with the same rules the shop and the checkout use. A service is never sold in bulk.
+  const wholesale = validateWholesale({ saleMode: form.type === 'service' ? 'retail' : form.sale_mode, moq: form.moq, tiers: form.tiers, price: form.price });
+  // True if this product already had bulk settings stored (so turning them off must be saved too).
+  const hadBulk = !!product && ((product.sale_mode && product.sale_mode !== 'retail') || Number(product.moq) > 1 || (Array.isArray(product.price_tiers) && product.price_tiers.length > 0));
 
   async function save(e) {
     e.preventDefault();
@@ -149,6 +168,17 @@ export default function ProductForm({ business, product, familyId, familyName, o
       unit_value: form.unit_value === '' ? null : Number(form.unit_value),
       show_in_catalogue: business.plan === 'pro' ? form.show_in_catalogue : false,
     };
+
+    // The bulk-selling fields are sent ONLY when they are in use (or are being switched off). An ordinary product therefore saves
+    // exactly the columns it always did, so nothing breaks for a shop whose database has not had the stage 63 update yet.
+    if (!wholesale.ok) {
+      setSaving(false);
+      setError(wholesale.error);
+      return;
+    }
+    if (wholesale.value.sale_mode !== 'retail' || hadBulk) {
+      Object.assign(payload, wholesale.value);
+    }
 
     // Only set on creation, and only when this form was opened via
     // "+ Add variant" on an existing product (see inventory/page.js).
@@ -409,6 +439,48 @@ export default function ProductForm({ business, product, familyId, familyName, o
           <p style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: form.price && form.cost_price !== '' ? 0 : -6, marginBottom: 10 }}>
             Cost price powers the Profit numbers on Analytics — leave it blank if you'd rather not track that.
           </p>
+
+          {form.type !== 'service' && (
+            <div data-testid="wholesale-section" style={{ border: '1px solid var(--border, #e6ddd0)', borderRadius: 10, padding: '10px 12px', margin: '4px 0 12px' }}>
+              <label style={labelStyle}>How do you sell this?</label>
+              <select aria-label="How do you sell this?" value={form.sale_mode} onChange={(e) => set('sale_mode', e.target.value)} style={inputStyle}>
+                {SALE_MODES.map((m) => (
+                  <option key={m} value={m}>{SALE_MODE_LABELS[m]}</option>
+                ))}
+              </select>
+              {form.sale_mode !== 'retail' && (
+                <div style={{ marginTop: 8 }}>
+                  {form.sale_mode === 'wholesale' && (
+                    <div style={{ marginBottom: 8 }}>
+                      <label style={labelStyle}>Smallest order (how many units)</label>
+                      <input aria-label="Smallest order" type="number" min="1" max={MAX_MOQ} step="1" value={form.moq} onChange={(e) => set('moq', e.target.value)} style={inputStyle} />
+                    </div>
+                  )}
+                  <p style={{ fontSize: 12, color: 'var(--text-faint)', margin: '0 0 6px' }}>
+                    Bulk prices (optional): from this many units, each one costs less than the normal price above.
+                  </p>
+                  {form.tiers.map((t, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+                      <input aria-label={`Bulk price ${i + 1} starts from (quantity)`} type="number" min="2" max={MAX_MOQ} step="1" placeholder="From quantity" value={t.min_qty} onChange={(e) => setTier(i, 'min_qty', e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+                      <input aria-label={`Bulk price ${i + 1} (₦ each)`} type="number" min="0" step="any" placeholder="₦ each" value={t.price} onChange={(e) => setTier(i, 'price', e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+                      <button type="button" aria-label={`Remove bulk price ${i + 1}`} onClick={() => removeTier(i)} style={{ border: 'none', background: 'none', color: 'var(--text-faint)', fontSize: 18, cursor: 'pointer' }}>×</button>
+                    </div>
+                  ))}
+                  {form.tiers.length < MAX_TIERS && (
+                    <button type="button" onClick={addTier} style={{ border: 'none', background: 'none', color: 'var(--accent, #0f766e)', fontWeight: 700, fontSize: 13, cursor: 'pointer', padding: 0 }}>
+                      + Add a bulk price
+                    </button>
+                  )}
+                  {!wholesale.ok && form.price !== '' && (
+                    <p data-testid="wholesale-error" style={{ fontSize: 12.5, color: '#b42318', margin: '8px 0 0' }}>{wholesale.error}</p>
+                  )}
+                  {wholesale.ok && wholesale.warnings.map((w) => (
+                    <p key={w} data-testid="wholesale-warning" style={{ fontSize: 12.5, color: '#92600a', margin: '8px 0 0' }}>{w}</p>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           <div style={{ display: 'flex', gap: 10 }}>
             <div style={{ flex: 1 }}>

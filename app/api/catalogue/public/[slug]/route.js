@@ -3,6 +3,7 @@ import { createAdminClient } from '../../../../../lib/supabaseAdmin';
 import { rateLimit, requestIp } from '../../../../../lib/rateLimit';
 import { selectCatalogueProducts } from '../../../../../lib/catalogueProducts';
 import { photosOf } from '../../../../../lib/productPhotos';
+import { wholesaleFields } from '../../../../../lib/wholesalePricing';
 import { marketplaceFor } from '../../../../../lib/marketplaces';
 
 // Both are needed on any route that reads live data: without them Next
@@ -106,6 +107,9 @@ export async function GET(req, { params }) {
         in_stock: p.type === 'service' || Number(p.stock_qty) > 0,
         photo_url: p.photo_url || null,
         photos: photosOf(p),
+        // Bulk selling: sale_mode, minimum order, bulk prices, and when the price last changed. An ordinary product sends
+        // the quiet defaults (retail, 1, none), so a marketplace that does not know about them loses nothing.
+        ...wholesaleFields(p),
       })),
     },
     { status: 200, headers: { 'Cache-Control': 'no-store' } }
