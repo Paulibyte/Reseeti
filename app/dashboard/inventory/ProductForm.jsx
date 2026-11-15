@@ -7,6 +7,7 @@ import { queueEdit } from '../../../lib/offlineQueue';
 import { getMaxImageUploadMb, getMaxImageUploadBytes } from '../../../lib/maxUploadSize';
 import { MAX_PRODUCT_PHOTOS, photosOf, photosChanged, movePhoto, makeCover, newPhotoPath, storagePathFor } from '../../../lib/productPhotos';
 import { prepareImage } from '../../../lib/compressImage';
+import { validateDeliverySize, suggestFromUnit } from '../../../lib/deliverySize';
 import { SALE_MODES, SALE_MODE_LABELS, MAX_TIERS, MAX_MOQ, validateWholesale } from '../../../lib/wholesalePricing';
 
 export default function ProductForm({ business, product, familyId, familyName, onClose, onSaved }) {
@@ -29,6 +30,9 @@ export default function ProductForm({ business, product, familyId, familyName, o
     // Bulk selling (lib/wholesalePricing.js). A product from before stage 63 has none of these and is simply retail.
     sale_mode: SALE_MODES.includes(product?.sale_mode) ? product.sale_mode : 'retail',
     moq: product?.moq ?? 1,
+    // Delivery size of ONE unit (lib/deliverySize.js); blank = not known.
+    weight_kg: product?.weight_kg ?? '',
+    volume_l: product?.volume_l ?? '',
     tiers: Array.isArray(product?.price_tiers) ? product.price_tiers.map((t) => ({ min_qty: String(t.min_qty ?? ''), price: String(t.price ?? '') })) : [],
   });
   const [saving, setSaving] = useState(false);
@@ -136,6 +140,10 @@ export default function ProductForm({ business, product, familyId, familyName, o
 
   // What the owner has entered for bulk selling, checked with the same rules the shop and the checkout use. A service is never sold in bulk.
   const wholesale = validateWholesale({ saleMode: form.type === 'service' ? 'retail' : form.sale_mode, moq: form.moq, tiers: form.tiers, price: form.price });
+  // How heavy and bulky one unit is, for a marketplace's delivery fee. Optional; checked with the same rules the catalogue applies.
+  const size = validateDeliverySize({ weight: form.weight_kg, volume: form.volume_l });
+  const hadSize = !!product && (product.weight_kg !== null && product.weight_kg !== undefined || product.volume_l !== null && product.volume_l !== undefined);
+  const sizeHint = form.type === 'service' ? null : suggestFromUnit(form.unit, form.unit_value);
   // True if this product already had bulk settings stored (so turning them off must be saved too).
   const hadBulk = !!product && ((product.sale_mode && product.sale_mode !== 'retail') || Number(product.moq) > 1 || (Array.isArray(product.price_tiers) && product.price_tiers.length > 0));
 
@@ -178,6 +186,17 @@ export default function ProductForm({ business, product, familyId, familyName, o
     }
     if (wholesale.value.sale_mode !== 'retail' || hadBulk) {
       Object.assign(payload, wholesale.value);
+    }
+
+    // The size is sent ONLY when it is filled in (or an earlier one is being cleared), so an ordinary product saves exactly the columns it
+    // always did and nothing breaks for a shop whose database has not had the stage 66 update yet.
+    if (!size.ok) {
+      setSaving(false);
+      setError(size.error);
+      return;
+    }
+    if (form.type !== 'service' && (size.value.weight_kg !== null || size.value.volume_l !== null || hadSize)) {
+      Object.assign(payload, size.value);
     }
 
     // Only set on creation, and only when this form was opened via
@@ -439,6 +458,25 @@ export default function ProductForm({ business, product, familyId, familyName, o
           <p style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: form.price && form.cost_price !== '' ? 0 : -6, marginBottom: 10 }}>
             Cost price powers the Profit numbers on Analytics — leave it blank if you'd rather not track that.
           </p>
+
+          {form.type !== 'service' && (
+            <div data-testid="delivery-size-section" style={{ border: '1px solid var(--border, #e6ddd0)', borderRadius: 10, padding: '10px 12px', margin: '4px 0 12px' }}>
+              <label style={labelStyle}>Delivery: how heavy and bulky is ONE unit? (optional)</label>
+              <p style={{ fontSize: 12, color: 'var(--text-faint)', margin: '0 0 6px' }}>
+                Used by marketplaces such as Bulktins to work out the delivery fee. If you leave the weight blank, buyers are told to ask you for the delivery fee.
+              </p>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input aria-label="Weight of one unit (kg)" type="number" min="0" step="any" placeholder="Weight (kg)" value={form.weight_kg} onChange={(e) => set('weight_kg', e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+                <input aria-label="Size of one unit (litres)" type="number" min="0" step="any" placeholder="Size (litres)" value={form.volume_l} onChange={(e) => set('volume_l', e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+              </div>
+              {sizeHint && String(form[sizeHint.field]) !== String(sizeHint.value) && (
+                <button type="button" data-testid="size-suggestion" onClick={() => set(sizeHint.field, String(sizeHint.value))} style={{ border: 'none', background: 'none', color: 'var(--accent, #0f766e)', fontWeight: 700, fontSize: 13, cursor: 'pointer', padding: '6px 0 0' }}>
+                  Use {sizeHint.value} {sizeHint.field === 'weight_kg' ? 'kg' : 'litres'} (from the size above)
+                </button>
+              )}
+              {!size.ok && <p data-testid="size-error" style={{ fontSize: 12.5, color: '#b42318', margin: '8px 0 0' }}>{size.error}</p>}
+            </div>
+          )}
 
           {form.type !== 'service' && (
             <div data-testid="wholesale-section" style={{ border: '1px solid var(--border, #e6ddd0)', borderRadius: 10, padding: '10px 12px', margin: '4px 0 12px' }}>

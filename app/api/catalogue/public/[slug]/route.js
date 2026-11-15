@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '../../../../../lib/supabaseAdmin';
 import { rateLimit, requestIp } from '../../../../../lib/rateLimit';
 import { selectCatalogueProducts } from '../../../../../lib/catalogueProducts';
+import { deliverySizeFields } from '../../../../../lib/deliverySize';
 import { photosOf } from '../../../../../lib/productPhotos';
 import { wholesaleFields } from '../../../../../lib/wholesalePricing';
 import { marketplaceFor } from '../../../../../lib/marketplaces';
@@ -110,6 +111,8 @@ export async function GET(req, { params }) {
         // Bulk selling: sale_mode, minimum order, bulk prices, and when the price last changed. An ordinary product sends
         // the quiet defaults (retail, 1, none), so a marketplace that does not know about them loses nothing.
         ...wholesaleFields(p),
+        // Delivery: how heavy (kg) and bulky (litres) one unit is; null when the shop has not said (the marketplace then asks the shop).
+        ...deliverySizeFields(p),
       })),
     },
     { status: 200, headers: { 'Cache-Control': 'no-store' } }
